@@ -1,0 +1,40 @@
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "ahmeterimyuzbasi@gmail.com",
+                "Name": "Aey"
+            }
+        ],
+        "Category": "",
+        "Description": "Wallpaper view for images",
+        "Icon": "preferences-desktop-wallpaper",
+        "Id": "org.aey.wallpaperengine",
+        "License": "Apache-2.0",
+        "Name": "Aeyian Wallpaper Engine",
+        "ServiceTypes": ["Plasma/Wallpaper"],
+        "MimeTypes": [
+            "image/jpeg",
+            "image/png",
+            "image/svg+xml",
+            "image/webp"
+        ],
+        "Website": "https://github.com/Aey1212/Aeyian-Wallpaper-Engine"
+    },
+    "Keywords": "",
+    "MimeType": "image/jpeg;image/png;image/svg+xml;image/webp;",
+    "X-Plasma-DropMimeTypes": [
+        "image/avif",
+        "image/gif",
+        "image/heif",
+        "image/jpeg",
+        "image/png",
+        "image/svg+xml",
+        "image/webp"
+    ],
+
+    "X-KDE-ParentApp": "org.kde.plasmashell",
+    "X-Plasma-API": "declarativeappletscript",
+    "X-Plasma-MainScript": "ui/main.qml",
+    "KPackageStructure": "Plasma/Wallpaper"
+}

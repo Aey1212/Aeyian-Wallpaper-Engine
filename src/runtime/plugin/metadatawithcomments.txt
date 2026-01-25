@@ -1,0 +1,43 @@
+This file exists because json don't allwo comments.
+---
+
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "ahmeterimyuzbasi@gmail.com",
+                "Name": "Aey"
+            }
+        ],
+        "Category": "", //TODO fill this shit
+        "Description": "Wallpaper view for images",
+        "Icon": "preferences-desktop-wallpaper",
+        "Id": "org.aey.wallpaperengine",      // Temporary ID
+        "License": "Apache-2.0",
+        "Name": "Aeyian Wallpaper Engine",
+        "ServiceTypes": ["Plasma/Wallpaper"],
+        "MimeTypes": [
+            "image/jpeg",
+            "image/png",
+            "image/svg+xml",
+            "image/webp"
+        ],
+        "Website": "https://github.com/Aey1212/Aeyian-Wallpaper-Engine"
+    },
+    "Keywords": "", //TODO fill this shit
+    "MimeType": "image/jpeg;image/png;image/svg+xml;image/webp;", // Redundant MIME dec.? The original KDE has the same schema so it is nneded? Too afraid to test.
+    "X-Plasma-DropMimeTypes": [
+        "image/avif",
+        "image/gif",
+        "image/heif",
+        "image/jpeg",
+        "image/png",
+        "image/svg+xml",
+        "image/webp"
+    ],
+
+    "X-KDE-ParentApp": "org.kde.plasmashell",
+    "X-Plasma-API": "declarativeappletscript",
+    "X-Plasma-MainScript": "ui/main.qml",
+    "KPackageStructure": "Plasma/Wallpaper"
+}
