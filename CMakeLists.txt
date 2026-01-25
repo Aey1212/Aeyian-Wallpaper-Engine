@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 - Aey
+
 cmake_minimum_required(VERSION 3.20)
 
 project(AeyianWallpaperEngine
