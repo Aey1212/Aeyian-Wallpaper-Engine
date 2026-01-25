@@ -23,4 +23,4 @@ Bring Wallpaper Engine-like functionality to Linux natively:
 
 ## License
 
-GPL-3.0
+Apache-2.0
