@@ -1,5 +1,7 @@
 # Aeyian Wallpaper Engine
 
+![License](https://img.shields.io/badge/License-Apache--2.0-blue) ![Version](https://img.shields.io/badge/Version-0.0.1-lightgreen)
+
 A native KDE Plasma 6 interactive wallpaper engine with a visual editor.
 
 ## Vision
