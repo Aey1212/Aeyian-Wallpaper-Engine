@@ -7,6 +7,7 @@ A native KDE Plasma 6 interactive wallpaper engine with a visual editor.
 ## Vision
 
 Bring Wallpaper Engine-like functionality to Linux natively:
+
 - Fully interactive wallpapers responding to mouse input
 - Visual editor for creating wallpapers without coding
 - User-customizable properties from Plasma settings
@@ -15,13 +16,41 @@ Bring Wallpaper Engine-like functionality to Linux natively:
 
 ## Status
 
-🚧 **Early Development**
+**Early Development** — Currently tracks cursor movements.**
 
 ## Target Platform
 
 - Arch Linux
 - KDE Plasma 6
 - Wayland
+
+## Installation
+
+```bash
+git clone https://github.com/Aey1212/Aeyian-Wallpaper-Engine.git
+
+cd Aeyian-Wallpaper-Engine
+
+./install.sh 
+```
+
+The installer will: 
+
+- Build the plugin 
+
+- Ask to add you to the `input` group (required for cursor tracking) 
+
+- Install to your local Plasma wallpapers
+
+
+
+Then: Right-click desktop → Configure Desktop → Wallpaper Type → **Aeyian Wallpaper Engine**
+
+
+
+**NOTE:** you might need to reboot for it to work in some cases. The installer will tell you if you need to.
+
+
 
 ## License
 
