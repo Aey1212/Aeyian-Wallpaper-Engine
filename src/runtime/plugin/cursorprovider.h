@@ -25,7 +25,7 @@ public:
     void setScreenWidth(qreal w) { m_screenWidth = w; }
     void setScreenHeight(qreal h) { m_screenHeight = h; }
 
-    // Must be public for libinput_interface
+    // Must be public for libinput_interface - source: reddit.
     static int openRestricted(const char *path, int flags, void *userData);
     static void closeRestricted(int fd, void *userData);
 
@@ -44,8 +44,8 @@ private:
     qreal m_rawY = 0.0;
     qreal m_mouseX = 0.0;
     qreal m_mouseY = 0.0;
-    qreal m_screenWidth = 1920.0;
-    qreal m_screenHeight = 1080.0;
+    qreal m_screenWidth = 1920.0; // TODO: Replace with dynamic screen detection for 4K/multi-monitor support
+    qreal m_screenHeight = 1080.0; // TODO: I mean don't just do it for width AMK'
 };
 
 #endif

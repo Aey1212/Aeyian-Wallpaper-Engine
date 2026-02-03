@@ -16,7 +16,7 @@ Bring Wallpaper Engine-like functionality to Linux natively:
 
 ## Status
 
-**Early Development** — Currently tracks cursor movements.**
+**Early Development** — Currently tracks cursor movements.
 
 ## Target Platform
 
@@ -42,13 +42,15 @@ The installer will:
 
 - Install to your local Plasma wallpapers
 
-
-
 Then: Right-click desktop → Configure Desktop → Wallpaper Type → **Aeyian Wallpaper Engine**
 
-
-
 **NOTE:** you might need to reboot for it to work in some cases. The installer will tell you if you need to.
+
+
+
+## Known Bugs
+
+- The engine currently assumes the starting point of your cursor. If it is guessing wrong, calibrate by getting your cursor to the top-left corner of the screen.
 
 
 

@@ -1,6 +1,6 @@
 import QtQuick
 import org.kde.plasma.plasmoid
-import org.aey.wallpaperengine 1.0
+import org.aey.wallpaperengine 1.0 // My beloved wayland mouse cursor plugin!
 
 WallpaperItem {
     id: root
