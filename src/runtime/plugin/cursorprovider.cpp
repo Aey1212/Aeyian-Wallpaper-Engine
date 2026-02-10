@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <libudev.h>
+#include <QElapsedTimer>
 
 int CursorProvider::openRestricted(const char *path, int flags, void *)
 {
@@ -52,6 +53,9 @@ CursorProvider::CursorProvider(QObject *parent)
 
     calibrate();
 
+    m_lastCalibration.start();
+    m_lastMovement.start();
+
     setupCalibrationTimer();
 }
 
@@ -70,6 +74,20 @@ void CursorProvider::setupCalibrationTimer()
 
 void CursorProvider::calibrate()
 {
+    // Cooldown: minimum 2 seconds between calibrations
+    if (m_lastCalibration.isValid() && m_lastCalibration.elapsed() < 2000) {
+        qDebug() << "Calibration cooldown, skipping";
+        return;
+    }
+
+    // Don't calibrate if mouse moved in last 100ms
+    if (m_lastMovement.isValid() && m_lastMovement.elapsed() < 100) {
+        qDebug() << "Mouse moving, skipping calibration";
+        return;
+    }
+
+    m_lastCalibration.restart();
+
     QString scriptPath = "/tmp/aeyian-cursor-calibrate.qml";
     QFile scriptFile(scriptPath);
     if (scriptFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
@@ -88,7 +106,6 @@ void CursorProvider::calibrate()
         qWarning() << "Failed to create calibration script";
         return;
     }
-
 
     QProcess loadProc;
     loadProc.start("qdbus", {"org.kde.KWin", "/Scripting",
@@ -144,6 +161,7 @@ void CursorProvider::handleEvents()
             m_mouseX = m_rawX / m_screenWidth;
             m_mouseY = m_rawY / m_screenHeight;
             emit positionChanged();
+            m_lastMovement.restart();
         }
         else if (type == LIBINPUT_EVENT_POINTER_MOTION_ABSOLUTE) {
             auto *pev = libinput_event_get_pointer_event(ev);
@@ -152,6 +170,7 @@ void CursorProvider::handleEvents()
             m_rawX = m_mouseX * m_screenWidth;
             m_rawY = m_mouseY * m_screenHeight;
             emit positionChanged();
+            m_lastMovement.restart();
         }
 
         libinput_event_destroy(ev);

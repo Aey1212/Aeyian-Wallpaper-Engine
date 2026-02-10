@@ -40,4 +40,14 @@ WallpaperItem {
             onClicked: cursor.calibrate()
         }
     }
+
+    Rectangle {
+        id: cursorfollow
+        width: 40
+        height: 40
+        radius: 20
+        color: "#e13b3e" // red dot, sniper confirmed!
+        x: cursor.mouseX * parent.width - 20
+        y: cursor.mouseY * parent.height - 20
+    }
 }

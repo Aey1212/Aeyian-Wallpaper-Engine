@@ -5,6 +5,7 @@
 #include <QSocketNotifier>
 #include <QTimer>
 #include <libinput.h>
+#include <QElapsedTimer>
 
 class CursorProvider : public QObject
 {
@@ -46,6 +47,8 @@ private:
     udev *m_udev = nullptr;
     QSocketNotifier *m_notifier = nullptr;
     QTimer *m_calibrationTimer = nullptr;
+    QElapsedTimer m_lastCalibration;
+    QElapsedTimer m_lastMovement;
 
     qreal m_rawX = 0.0;
     qreal m_rawY = 0.0;
