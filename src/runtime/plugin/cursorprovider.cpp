@@ -1,5 +1,9 @@
 #include "cursorprovider.h"
 #include <QDebug>
+#include <QProcess>
+#include <QFile>
+#include <QThread>
+#include <QRegularExpression>
 #include <fcntl.h>
 #include <unistd.h>
 #include <libudev.h>
@@ -21,7 +25,7 @@ static const libinput_interface iface = {
 };
 
 CursorProvider::CursorProvider(QObject *parent)
-    : QObject(parent)
+: QObject(parent)
 {
     m_udev = udev_new();
     if (!m_udev) {
@@ -43,8 +47,12 @@ CursorProvider::CursorProvider(QObject *parent)
     int fd = libinput_get_fd(m_li);
     m_notifier = new QSocketNotifier(fd, QSocketNotifier::Read, this);
     connect(m_notifier, &QSocketNotifier::activated, this, &CursorProvider::handleEvents);
-    
+
     handleEvents();
+
+    calibrate();
+
+    setupCalibrationTimer();
 }
 
 CursorProvider::~CursorProvider()
@@ -53,24 +61,86 @@ CursorProvider::~CursorProvider()
     if (m_udev) udev_unref(m_udev);
 }
 
+void CursorProvider::setupCalibrationTimer()
+{
+    m_calibrationTimer = new QTimer(this);
+    connect(m_calibrationTimer, &QTimer::timeout, this, &CursorProvider::calibrate);
+    m_calibrationTimer->start(3600000); // 1 hour in milliseconds
+}
+
+void CursorProvider::calibrate()
+{
+    QString scriptPath = "/tmp/aeyian-cursor-calibrate.qml";
+    QFile scriptFile(scriptPath);
+    if (scriptFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        scriptFile.write(
+            "import QtQuick\n"
+            "import org.kde.kwin as KWin\n"
+            "Item {\n"
+            "    Component.onCompleted: {\n"
+            "        var pos = KWin.Workspace.cursorPos;\n"
+            "        console.log(\"AEYIAN_CURSOR:\" + pos.x + \",\" + pos.y);\n"
+            "    }\n"
+            "}\n"
+        );
+        scriptFile.close();
+    } else {
+        qWarning() << "Failed to create calibration script";
+        return;
+    }
+
+
+    QProcess loadProc;
+    loadProc.start("qdbus", {"org.kde.KWin", "/Scripting",
+        "org.kde.kwin.Scripting.loadDeclarativeScript", scriptPath, "aeyian-calibrate"});
+    loadProc.waitForFinished(1000);
+
+    QProcess startProc;
+    startProc.start("qdbus", {"org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.start"});
+    startProc.waitForFinished(1000);
+    QThread::msleep(50);
+    QProcess journalProc;
+    journalProc.start("journalctl", {"-t", "kwin_wayland", "-o", "cat", "--since", "5 seconds ago"});
+    journalProc.waitForFinished(1000);
+    QString output = journalProc.readAllStandardOutput();
+
+    QProcess unloadProc;
+    unloadProc.start("qdbus", {"org.kde.KWin", "/Scripting",
+        "org.kde.kwin.Scripting.unloadScript", "aeyian-calibrate"});
+    unloadProc.waitForFinished(1000);
+
+    QRegularExpression re("AEYIAN_CURSOR:(\\d+),(\\d+)");
+    QRegularExpressionMatch match = re.match(output);
+    if (match.hasMatch()) {
+        m_rawX = match.captured(1).toDouble();
+        m_rawY = match.captured(2).toDouble();
+        m_mouseX = m_rawX / m_screenWidth;
+        m_mouseY = m_rawY / m_screenHeight;
+        emit positionChanged();
+        qDebug() << "Calibrated cursor position:" << m_rawX << m_rawY;
+    } else {
+        qWarning() << "Failed to parse cursor position from journal";
+    }
+}
+
 void CursorProvider::handleEvents()
 {
     if (!m_li) return;
 
     libinput_dispatch(m_li);
-    
+
     libinput_event *ev;
     while ((ev = libinput_get_event(m_li))) {
         auto type = libinput_event_get_type(ev);
-        
+
         if (type == LIBINPUT_EVENT_POINTER_MOTION) {
             auto *pev = libinput_event_get_pointer_event(ev);
             m_rawX += libinput_event_pointer_get_dx(pev);
             m_rawY += libinput_event_pointer_get_dy(pev);
-            
+
             m_rawX = qBound(0.0, m_rawX, m_screenWidth);
             m_rawY = qBound(0.0, m_rawY, m_screenHeight);
-            
+
             m_mouseX = m_rawX / m_screenWidth;
             m_mouseY = m_rawY / m_screenHeight;
             emit positionChanged();
@@ -83,7 +153,7 @@ void CursorProvider::handleEvents()
             m_rawY = m_mouseY * m_screenHeight;
             emit positionChanged();
         }
-        
+
         libinput_event_destroy(ev);
     }
 }

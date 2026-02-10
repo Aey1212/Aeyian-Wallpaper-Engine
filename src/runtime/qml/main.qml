@@ -24,4 +24,20 @@ WallpaperItem {
         color: "#e1e1e1" // white go brr!
         font.pixelSize: 14
     }
+
+    Rectangle {
+        width: 100
+        height: 40
+        color: "white"
+        anchors.bottom: parent.bottom
+        anchors.right: parent.right
+        Text {
+            anchors.centerIn: parent
+            text: "Manual Test" // Real big fix
+        }
+        MouseArea {
+            anchors.fill: parent
+            onClicked: cursor.calibrate()
+        }
+    }
 }

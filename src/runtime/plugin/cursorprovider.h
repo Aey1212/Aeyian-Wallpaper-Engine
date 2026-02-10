@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QSocketNotifier>
+#include <QTimer>
 #include <libinput.h>
 
 class CursorProvider : public QObject
@@ -25,6 +26,9 @@ public:
     void setScreenWidth(qreal w) { m_screenWidth = w; }
     void setScreenHeight(qreal h) { m_screenHeight = h; }
 
+    // TODO: add when GUI - calibrate that shit
+    Q_INVOKABLE void calibrate();
+
     // Must be public for libinput_interface - source: reddit.
     static int openRestricted(const char *path, int flags, void *userData);
     static void closeRestricted(int fd, void *userData);
@@ -36,10 +40,13 @@ private slots:
     void handleEvents();
 
 private:
+    void setupCalibrationTimer();
+
     libinput *m_li = nullptr;
     udev *m_udev = nullptr;
     QSocketNotifier *m_notifier = nullptr;
-    
+    QTimer *m_calibrationTimer = nullptr;
+
     qreal m_rawX = 0.0;
     qreal m_rawY = 0.0;
     qreal m_mouseX = 0.0;
