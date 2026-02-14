@@ -74,14 +74,14 @@ void CursorProvider::setupCalibrationTimer()
 
 void CursorProvider::calibrate()
 {
-    // Cooldown: minimum 2 seconds between calibrations
-    if (m_lastCalibration.isValid() && m_lastCalibration.elapsed() < 2000) {
+    // Cooldown: minimum 5 seconds between calibrations - 2 was too fucking small to not decaliber by mistake
+    if (m_lastCalibration.isValid() && m_lastCalibration.elapsed() < 5000) {
         qDebug() << "Calibration cooldown, skipping";
         return;
     }
 
-    // Don't calibrate if mouse moved in last 100ms
-    if (m_lastMovement.isValid() && m_lastMovement.elapsed() < 100) {
+    // Don't calibrate if mouse moved in last 200ms
+    if (m_lastMovement.isValid() && m_lastMovement.elapsed() < 200) {
         qDebug() << "Mouse moving, skipping calibration";
         return;
     }
