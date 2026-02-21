@@ -91,9 +91,11 @@ sudo cp "$PLUGIN_SRC/qmldir" /usr/lib/qt6/qml/org/aey/wallpaperengine/
 aey_progress 4 "$TOTAL_STEPS" "Installing wallpaper..."
 WALLPAPER_DIR="$HOME/.local/share/plasma/wallpapers/org.aey.wallpaperengine"
 mkdir -p "$WALLPAPER_DIR/contents/ui"
+mkdir -p "$WALLPAPER_DIR/contents/config"
 cp "$PLUGIN_SRC/metadata.json" "$WALLPAPER_DIR/"
 cp "$QML_SRC/main.qml" "$WALLPAPER_DIR/contents/ui/"
 cp "$QML_SRC/config.qml" "$WALLPAPER_DIR/contents/ui/"
+cp "$SCRIPT_DIR/src/runtime/config/main.xml" "$WALLPAPER_DIR/contents/config/"
 
 # Step 5: Done
 aey_progress 5 "$TOTAL_STEPS" "Installation complete!"

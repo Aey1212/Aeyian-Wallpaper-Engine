@@ -25,19 +25,11 @@ WallpaperItem {
         font.pixelSize: 14
     }
 
-    Rectangle {
-        width: 100
-        height: 40
-        color: "white"
-        anchors.bottom: parent.bottom
-        anchors.right: parent.right
-        Text {
-            anchors.centerIn: parent
-            text: "Manual Test" // Real big fix
-        }
-        MouseArea {
-            anchors.fill: parent
-            onClicked: cursor.calibrate()
+    // Calibrate button is instant thanks to this
+    property int triggerCalibrate: root.configuration.triggerCalibrate ?? 0
+    onTriggerCalibrateChanged: {
+        if (triggerCalibrate > 0) {
+            cursor.calibrate()
         }
     }
 
