@@ -1,16 +1,33 @@
 #!/usr/bin/env python3
 import json
-import subprocess
 import shutil
 import sys
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication, QMainWindow
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QStackedWidget, QWidget,
+    QLabel, QVBoxLayout, QHBoxLayout, QFrame,
+)
 from PySide6.QtCore import Qt
 
 
 _HOME = Path.home()
 _WHICH = shutil.which
+
+PROJECTS_DIR = _HOME / ".local" / "share" / "interactive-wallpapers"
+CONFIG_PATH = _HOME / ".config" / "AWE.json" #TODO: actually use it.
+
+AEYIAN_BLUE = "#3A41E1"
+
+DARK_STYLE = f"""
+    QMainWindow, QWidget {{
+        background-color: #1e1e1e;
+        color: #e1e1e1;
+    }}
+    QLabel {{
+        color: #e1e1e1;
+    }}
+"""
 
 
 def find_qdbus():
@@ -25,23 +42,83 @@ def find_qdbus():
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Aeyian Wallpaper Engine")
-        self.resize(500, 500)
-        
-        self.folder_path = None
-        self.selected_image_path = self.read_current_kde_wallpaper()
-        self.config_path = _HOME / ".config" / "AWE.json" #TODO: actually use it.
-        self.load_config()
+        self.setWindowTitle("AWE - Aeyian Wallpaper Engine")
+        self.resize(1200, 800)
 
-    def read_current_kde_wallpaper(self):
-        return None
+        PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    def load_config(self):
-        pass
+        # 0 is main screen & 1 is editor
+        self._views = QStackedWidget()
+        self.setCentralWidget(self._views)
+
+        self._main_screen = self._build_main_screen()
+        self._editor_view = self._build_editor_view()
+
+        self._views.addWidget(self._main_screen)
+        self._views.addWidget(self._editor_view)
+
+        self.show_main_screen()
+
+    def show_main_screen(self):
+        self._views.setCurrentIndex(0)
+
+    def show_editor(self):
+        self._views.setCurrentIndex(1)
+
+    def _build_main_screen(self) -> QWidget:
+        page = QWidget()
+        layout = QHBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Sidebar
+        sidebar = QFrame()
+        sidebar.setFixedWidth(280)
+        sidebar.setStyleSheet(f"background-color: #060916;")
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(12, 12, 12, 12)
+        sidebar_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        sidebar_label = QLabel("Properties")
+        sidebar_label.setStyleSheet(f"font-size: 16px; color: {AEYIAN_BLUE}; background: transparent;")
+        sidebar_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        sidebar_layout.addWidget(sidebar_label)
+        sidebar_layout.addStretch()
+
+        # The thin line thingy inbetween
+        separator = QFrame()
+        separator.setFixedWidth(1)
+        separator.setStyleSheet("background-color: #161954;")
+
+        # Wallpaper area
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        content_label = QLabel("Wallpapers")
+        content_label.setStyleSheet(f"font-size: 24px; color: {AEYIAN_BLUE};")
+        content_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        content_layout.addWidget(content_label)
+
+        layout.addWidget(sidebar)
+        layout.addWidget(separator)
+        layout.addWidget(content, 1)
+
+        return page
+
+    def _build_editor_view(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label = QLabel("Editor")
+        label.setStyleSheet(f"font-size: 24px; color: {AEYIAN_BLUE};")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(label)
+        return page
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setStyleSheet(DARK_STYLE)
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
