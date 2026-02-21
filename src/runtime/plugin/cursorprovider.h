@@ -2,6 +2,7 @@
 #define CURSORPROVIDER_H
 
 #include <QObject>
+#include <QString>
 #include <QSocketNotifier>
 #include <QTimer>
 #include <libinput.h>
@@ -42,13 +43,26 @@ private slots:
 
 private:
     void setupCalibrationTimer();
+    void setupEmitTimer();
+    void emitIfDirty();
+
+    // Calibration async chain - don't touch
+    void onScriptLoaded(int exitCode);
+    void onScriptStarted(int exitCode);
+    void onJournalRead(int exitCode, const QString &output);
+    void onScriptUnloaded(int exitCode);
 
     libinput *m_li = nullptr;
     udev *m_udev = nullptr;
     QSocketNotifier *m_notifier = nullptr;
     QTimer *m_calibrationTimer = nullptr;
+    QTimer *m_emitTimer = nullptr;
     QElapsedTimer m_lastCalibration;
     QElapsedTimer m_lastMovement;
+
+    bool m_dirty = false;
+    bool m_calibrating = false;
+    QString m_qdbusCmd;
 
     qreal m_rawX = 0.0;
     qreal m_rawY = 0.0;
