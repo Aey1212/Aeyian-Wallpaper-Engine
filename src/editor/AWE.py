@@ -3,18 +3,20 @@ import json
 import random
 import shutil
 import string
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QStackedWidget, QWidget,
+    QApplication, QMainWindow, QWidget,
     QLabel, QVBoxLayout, QHBoxLayout, QFrame, QPushButton,
     QScrollArea, QGridLayout, QDialog, QLineEdit, QSpinBox,
     QDialogButtonBox, QSizePolicy, QMessageBox, QInputDialog,
+    QComboBox, QFormLayout,
 )
-from PySide6.QtGui import QPixmap, QImage, QColor
-from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap, QImage, QColor, QDesktopServices
+from PySide6.QtCore import Qt, QUrl
 
 
 _HOME = Path.home()
@@ -37,6 +39,7 @@ CARD_H = 90
 SIDEBAR_PREVIEW_W = 256
 SIDEBAR_PREVIEW_H = 144
 
+#TODO: Pull the theme from config and also possibly push via custom theme saving way way later?
 DARK_STYLE = f"""
     QMainWindow, QWidget {{
         background-color: #1e1e1e;
@@ -123,6 +126,50 @@ class NewProjectDialog(QDialog):
         }
 
 
+class SettingsDialog(QDialog):
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Settings")
+        self.setFixedSize(360, 240)
+        layout = QVBoxLayout(self)
+
+
+        form = QFormLayout()
+        form.setSpacing(10)
+
+        self.language_combo = QComboBox()
+        self.language_combo.addItems(["English"])
+        form.addRow("Language:", self.language_combo)
+
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItems(["Aeyian Dark"])
+        form.addRow("Theme:", self.theme_combo)
+
+        layout.addLayout(form)
+        layout.addSpacing(8)
+
+        open_folder_btn = QPushButton("Open Projects Folder")
+        open_folder_btn.clicked.connect(self._open_projects_folder)
+        layout.addWidget(open_folder_btn)
+
+        layout.addStretch()
+
+        btn_row = QHBoxLayout()
+        btn_apply = QPushButton("Apply")
+        btn_cancel = QPushButton("Cancel")
+        btn_reset = QPushButton("Reset to Default")
+        btn_row.addWidget(btn_apply)
+        btn_row.addWidget(btn_cancel)
+        btn_row.addStretch()
+        btn_row.addWidget(btn_reset)
+
+        layout.addLayout(btn_row)
+
+    def _open_projects_folder(self):
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(PROJECTS_DIR)))
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -133,14 +180,8 @@ class MainWindow(QMainWindow):
 
         PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
 
-        # 0 is main screen & 1 is editor
-        self._views = QStackedWidget()
-        self.setCentralWidget(self._views)
         self._main_screen = self._build_main_screen()
-        self._editor_view = self._build_editor_view()
-        self._views.addWidget(self._main_screen)
-        self._views.addWidget(self._editor_view)
-        self.show_main_screen()
+        self.setCentralWidget(self._main_screen)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -149,12 +190,6 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._refresh_grid()
-
-    def show_main_screen(self):
-        self._views.setCurrentIndex(0)
-
-    def show_editor(self):
-        self._views.setCurrentIndex(1)
 
 
     def _scan_projects(self) -> list[dict]:
@@ -215,6 +250,13 @@ class MainWindow(QMainWindow):
         self._select_project(project_dir)
 
 
+    def _on_edit_project(self):
+        if not self._selected_project:
+            return
+        awc_path = Path(__file__).parent / "AWC.py"
+        subprocess.Popen([sys.executable, str(awc_path), str(self._selected_project)])
+        QApplication.quit()
+
     def _on_rename_project(self):
         if not self._selected_project:
             return
@@ -263,6 +305,10 @@ class MainWindow(QMainWindow):
         self._clear_sidebar()
         self._refresh_grid()
 
+
+    def _on_settings(self):
+        dialog = SettingsDialog(self)
+        dialog.exec()
 
     def _refresh_grid(self):
         while self._grid_layout.count():
@@ -446,6 +492,7 @@ class MainWindow(QMainWindow):
             """)
             sidebar_btn_row.addWidget(btn)
 
+        self._btn_edit.clicked.connect(self._on_edit_project)
         self._btn_rename.clicked.connect(self._on_rename_project)
         self._btn_delete.clicked.connect(self._on_delete_project)
 
@@ -479,7 +526,9 @@ class MainWindow(QMainWindow):
         new_btn = QPushButton("+ New Project")
         new_btn.clicked.connect(self._on_new_project)
         content_btn_row.addWidget(new_btn)
-        content_btn_row.addWidget(QPushButton("Settings"))
+        settings_btn = QPushButton("Settings")
+        settings_btn.clicked.connect(self._on_settings)
+        content_btn_row.addWidget(settings_btn)
         content_btn_row.addStretch()
         content_layout.addLayout(content_btn_row)
 
@@ -488,16 +537,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(content, 1)
         self._refresh_grid()
 
-        return page
-
-    def _build_editor_view(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label = QLabel("Editor")
-        label.setStyleSheet(f"font-size: 24px; color: {AEYIAN_BLUE};")
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(label)
         return page
 
 
