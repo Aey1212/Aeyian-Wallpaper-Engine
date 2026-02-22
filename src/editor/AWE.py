@@ -84,6 +84,12 @@ def generate_red_preview(path: Path):
     img.save(str(path))
 
 
+def generate_canvas(path: Path, width: int, height: int):
+    img = QImage(width, height, QImage.Format.Format_ARGB32)
+    img.fill(Qt.GlobalColor.transparent)
+    img.save(str(path))
+
+
 class NewProjectDialog(QDialog):
 
     def __init__(self, parent=None):
@@ -229,6 +235,7 @@ class MainWindow(QMainWindow):
         (project_dir / "assets").mkdir()
 
         generate_red_preview(project_dir / "preview.png")
+        generate_canvas(project_dir / "canvas.png", values["width"], values["height"])
 
         manifest = {
             "id": project_id,
@@ -239,7 +246,25 @@ class MainWindow(QMainWindow):
                 "width": values["width"],
                 "height": values["height"],
             },
-            "layers": [],
+            "layers": [
+                {
+                    "id": 0,
+                    "name": "Canvas",
+                    "type": "canvas",
+                    "source": "canvas.png",
+                },
+                {
+                    "id": 1,
+                    "name": "Background",
+                    "type": "solid_color",
+                    "color": "#ffffff",
+                    "position": {"x": 0, "y": 0},
+                    "size": {
+                        "width": values["width"],
+                        "height": values["height"],
+                    },
+                },
+            ],
             "properties": {},
         }
         (project_dir / "project.json").write_text(

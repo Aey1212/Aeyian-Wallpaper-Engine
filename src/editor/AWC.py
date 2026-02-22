@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import math
 import subprocess
 import sys
 from pathlib import Path
@@ -9,7 +10,8 @@ from PySide6.QtWidgets import (
     QLabel, QVBoxLayout, QHBoxLayout, QFrame, QSplitter,
     QPushButton, QMenu,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtGui import QPainter, QColor, QPixmap, QPolygonF
+from PySide6.QtCore import Qt, QPointF, QRectF
 
 #TODO: Pull the theme from config
 
@@ -58,6 +60,132 @@ PANEL_BORDER = "#2a2a2a"
 AEYIAN_BLUE = "#3A41E1"
 
 
+HEX_LIGHT = "#3a3a3a"
+HEX_MID = "#2e2e2e"
+HEX_DARK = "#232323"
+HEX_RADIUS = 12
+
+
+class CanvasView(QWidget):
+
+    def __init__(self, project_path: Path, layers: list):
+        super().__init__()
+        self._layers = layers
+        self._scale = 1.0
+        self._offset_x = 0.0
+        self._offset_y = 0.0
+
+        canvas_path = project_path / "canvas.png"
+        if canvas_path.exists():
+            self._canvas_pixmap = QPixmap(str(canvas_path))
+            self._canvas_w = self._canvas_pixmap.width()
+            self._canvas_h = self._canvas_pixmap.height()
+        else:
+            try:
+                data = json.loads((project_path / "project.json").read_text())
+                res = data.get("resolution", {})
+                self._canvas_w = res.get("width", 1920)
+                self._canvas_h = res.get("height", 1080)
+            except (json.JSONDecodeError, OSError):
+                self._canvas_w = 1920
+                self._canvas_h = 1080
+            self._canvas_pixmap = None
+
+        self._hex_cache = None
+        self._hex_cache_size = None
+
+    def _update_transform(self):
+        padding = 20
+        avail_w = self.width() - padding * 2
+        avail_h = self.height() - padding * 2
+        if avail_w <= 0 or avail_h <= 0:
+            return
+        scale_x = avail_w / self._canvas_w
+        scale_y = avail_h / self._canvas_h
+        self._scale = min(scale_x, scale_y)
+        scaled_w = self._canvas_w * self._scale
+        scaled_h = self._canvas_h * self._scale
+        self._offset_x = (self.width() - scaled_w) / 2
+        self._offset_y = (self.height() - scaled_h) / 2
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_transform()
+        self.update()
+
+    def _build_hex_cache(self, w, h):
+        r = HEX_RADIUS
+        hex_w = math.sqrt(3) * r
+        hex_h = 2 * r
+        row_step = hex_h * 0.75
+        colors = [QColor(HEX_LIGHT), QColor(HEX_MID), QColor(HEX_DARK)]
+
+        pixmap = QPixmap(int(w), int(h))
+        pixmap.fill(QColor(HEX_DARK))
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+
+        rows = int(h / row_step) + 3
+        cols = int(w / hex_w) + 3
+
+        for row in range(-1, rows):
+            for col in range(-1, cols):
+                cx = col * hex_w + (hex_w * 0.5 if row % 2 else 0)
+                cy = row * row_step
+                ci = ((row % 3) + col) % 3
+                painter.setBrush(colors[ci])
+                points = []
+                for i in range(6):
+                    angle_rad = math.radians(60 * i - 30)
+                    points.append(QPointF(
+                        cx + r * math.cos(angle_rad),
+                        cy + r * math.sin(angle_rad),
+                    ))
+                painter.drawPolygon(QPolygonF(points))
+
+        painter.end()
+        self._hex_cache = pixmap
+        self._hex_cache_size = (int(w), int(h))
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        painter.fillRect(self.rect(), QColor("#1e1e1e"))
+
+        canvas_rect = QRectF(
+            self._offset_x, self._offset_y,
+            self._canvas_w * self._scale,
+            self._canvas_h * self._scale,
+        )
+
+        cw = int(canvas_rect.width())
+        ch = int(canvas_rect.height())
+        if cw > 0 and ch > 0:
+            if self._hex_cache is None or self._hex_cache_size != (cw, ch):
+                self._build_hex_cache(cw, ch)
+            painter.drawPixmap(canvas_rect.toAlignedRect(), self._hex_cache)
+
+        if self._canvas_pixmap:
+            painter.drawPixmap(canvas_rect.toAlignedRect(), self._canvas_pixmap)
+
+        for layer in self._layers:
+            if layer.get("id", 0) == 0:
+                continue
+            layer_type = layer.get("type", "")
+            if layer_type == "solid_color":
+                pos = layer.get("position", {"x": 0, "y": 0})
+                size = layer.get("size", {"width": self._canvas_w, "height": self._canvas_h})
+                lx = self._offset_x + pos["x"] * self._scale
+                ly = self._offset_y + pos["y"] * self._scale
+                lw = size["width"] * self._scale
+                lh = size["height"] * self._scale
+                painter.fillRect(QRectF(lx, ly, lw, lh), QColor(layer.get("color", "#ffffff")))
+
+        painter.end()
+
+
 class CreatorWindow(QMainWindow):
 
     def __init__(self, project_path: Path):
@@ -67,8 +195,10 @@ class CreatorWindow(QMainWindow):
         try:
             data = json.loads((project_path / "project.json").read_text())
             self._project_name = data.get("name", project_path.name)
+            self._layers = data.get("layers", [])
         except (json.JSONDecodeError, OSError):
             self._project_name = project_path.name
+            self._layers = []
 
         self.setWindowTitle(f"AWC - {self._project_name}")
         self.resize(1400, 900)
@@ -150,6 +280,14 @@ class CreatorWindow(QMainWindow):
         layers_header = QLabel("Layers")
         layers_header.setStyleSheet(f"font-size: 14px; color: {AEYIAN_BLUE}; background: transparent;")
         layers_layout.addWidget(layers_header)
+
+        for layer in self._layers:
+            if layer.get("id", 0) == 0:
+                continue
+            row = QLabel(layer.get("name", f"Layer {layer['id']}"))
+            row.setStyleSheet("font-size: 12px; color: #e1e1e1; background: transparent; padding: 4px 0px;")
+            layers_layout.addWidget(row)
+
         layers_layout.addStretch()
         add_layer_btn = QPushButton("+")
         add_layer_btn.setFixedSize(32, 32)
@@ -175,9 +313,8 @@ class CreatorWindow(QMainWindow):
         layers_layout.addWidget(add_layer_btn)
         splitter.addWidget(layers_panel)
 
-        canvas = QFrame()
+        canvas = CanvasView(self._project_path, self._layers)
         canvas.setMinimumWidth(300)
-        canvas.setStyleSheet("background-color: #1e1e1e;")
         splitter.addWidget(canvas)
 
         inspector_panel = QFrame()
