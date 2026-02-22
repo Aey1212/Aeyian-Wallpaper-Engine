@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QStackedWidget, QWidget,
-    QLabel, QVBoxLayout, QHBoxLayout, QFrame,
+    QLabel, QVBoxLayout, QHBoxLayout, QFrame, QPushButton,
 )
 from PySide6.QtCore import Qt
 
@@ -18,6 +18,10 @@ PROJECTS_DIR = _HOME / ".local" / "share" / "interactive-wallpapers"
 CONFIG_PATH = _HOME / ".config" / "AWE.json" #TODO: actually use it.
 
 AEYIAN_BLUE = "#3A41E1"
+BTN_BG = "#2a2a2a"
+BTN_TEXT = "#e1e1e1"
+BTN_BORDER = "#3a3a3a"
+BTN_HOVER = "#353535"
 
 DARK_STYLE = f"""
     QMainWindow, QWidget {{
@@ -26,6 +30,17 @@ DARK_STYLE = f"""
     }}
     QLabel {{
         color: #e1e1e1;
+    }}
+    QPushButton {{
+        background-color: {BTN_BG};
+        color: {BTN_TEXT};
+        border: 1px solid {BTN_BORDER};
+        border-radius: 4px;
+        padding: 6px 16px;
+        font-size: 13px;
+    }}
+    QPushButton:hover {{
+        background-color: {BTN_HOVER};
     }}
 """
 
@@ -50,13 +65,10 @@ class MainWindow(QMainWindow):
         # 0 is main screen & 1 is editor
         self._views = QStackedWidget()
         self.setCentralWidget(self._views)
-
         self._main_screen = self._build_main_screen()
         self._editor_view = self._build_editor_view()
-
         self._views.addWidget(self._main_screen)
         self._views.addWidget(self._editor_view)
-
         self.show_main_screen()
 
     def show_main_screen(self):
@@ -84,6 +96,16 @@ class MainWindow(QMainWindow):
         sidebar_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         sidebar_layout.addWidget(sidebar_label)
         sidebar_layout.addStretch()
+        sidebar_btn_row = QHBoxLayout()
+        sidebar_btn_row.setSpacing(6)
+        for name in ("Edit", "Rename", "Delete"):
+            btn = QPushButton(name)
+            btn.setStyleSheet(f"""
+                QPushButton {{ background: transparent; border: 1px solid {BTN_BORDER}; }}
+                QPushButton:hover {{ background-color: {BTN_HOVER}; }}
+            """)
+            sidebar_btn_row.addWidget(btn)
+        sidebar_layout.addLayout(sidebar_btn_row)
 
         # The thin line thingy inbetween
         separator = QFrame()
@@ -93,11 +115,18 @@ class MainWindow(QMainWindow):
         # Wallpaper area
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        content_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        content_layout.setContentsMargins(12, 12, 12, 12)
+
         content_label = QLabel("Wallpapers")
         content_label.setStyleSheet(f"font-size: 24px; color: {AEYIAN_BLUE};")
         content_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        content_layout.addWidget(content_label)
+        content_layout.addWidget(content_label, 1)
+        content_btn_row = QHBoxLayout()
+        content_btn_row.setSpacing(6)
+        content_btn_row.addWidget(QPushButton("+ New Project"))
+        content_btn_row.addWidget(QPushButton("Settings"))
+        content_btn_row.addStretch()
+        content_layout.addLayout(content_btn_row)
 
         layout.addWidget(sidebar)
         layout.addWidget(separator)
