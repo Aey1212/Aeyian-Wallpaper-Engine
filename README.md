@@ -1,6 +1,6 @@
 # Aeyian Wallpaper Engine
 
-![License](https://img.shields.io/badge/License-Apache--2.0-blue) ![Version](https://img.shields.io/badge/Version-0.0.2-lightgreen)
+![License](https://img.shields.io/badge/License-Apache--2.0-blue) ![Version](https://img.shields.io/badge/Version-0.0.3-lightgreen)
 
 A native KDE Plasma 6 interactive wallpaper engine with a visual editor.
 
@@ -16,7 +16,10 @@ Bring Wallpaper Engine-like functionality to Linux natively:
 
 ## Status
 
-**Early Development**: Tracks simulated cursor and calibrates periodically to fix drift.
+**Early Development**
+- Tracks simulated cursor and calibrates periodically to fix drift
+- Configure option at the plugin page to be integrated with the GUI later
+- Non-integrated GUI app is available at the project
 
 ## Target Platform
 

@@ -7,6 +7,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QLabel, QVBoxLayout, QHBoxLayout, QFrame, QSplitter,
+    QPushButton, QMenu,
 )
 from PySide6.QtCore import Qt
 
@@ -36,6 +37,18 @@ DARK_STYLE = f"""
         font-size: 13px;
     }}
     QPushButton:hover {{
+        background-color: {BTN_HOVER};
+    }}
+    QMenu {{
+        background-color: #252525;
+        color: #e1e1e1;
+        border: 1px solid {BTN_BORDER};
+        padding: 4px 0px;
+    }}
+    QMenu::item {{
+        padding: 6px 24px;
+    }}
+    QMenu::item:selected {{
         background-color: {BTN_HOVER};
     }}
 """
@@ -76,6 +89,53 @@ class CreatorWindow(QMainWindow):
         name_label.setStyleSheet(f"font-size: 14px; color: {AEYIAN_BLUE}; background: transparent;")
         top_layout.addWidget(name_label)
 
+        top_layout.addSpacing(16)
+
+        menu_btn_style = f"""
+            QPushButton {{
+                background: transparent;
+                border: none;
+                color: #e1e1e1;
+                padding: 4px 10px;
+                font-size: 13px;
+            }}
+            QPushButton:hover {{
+                background-color: {BTN_HOVER};
+                border-radius: 4px;
+            }}
+            QPushButton::menu-indicator {{ image: none; }}
+        """
+
+        project_btn = QPushButton("Project")
+        project_btn.setStyleSheet(menu_btn_style)
+        project_menu = QMenu(project_btn)
+        project_menu.addAction("Save")
+        project_menu.addAction("Save As")
+        project_menu.addSeparator()
+        project_menu.addAction("Configure")
+        project_btn.setMenu(project_menu)
+        top_layout.addWidget(project_btn)
+
+        edit_btn = QPushButton("Edit")
+        edit_btn.setStyleSheet(menu_btn_style)
+        edit_menu = QMenu(edit_btn)
+        edit_menu.addAction("Undo")
+        edit_menu.addAction("Redo")
+        edit_menu.addSeparator()
+        edit_menu.addAction("Cut")
+        edit_menu.addAction("Copy")
+        edit_menu.addAction("Paste")
+        edit_btn.setMenu(edit_menu)
+        top_layout.addWidget(edit_btn)
+
+        help_btn = QPushButton("Help")
+        help_btn.setStyleSheet(menu_btn_style)
+        help_menu = QMenu(help_btn)
+        help_menu.addAction("Documentation")
+        help_menu.addAction("About AWC")
+        help_btn.setMenu(help_menu)
+        top_layout.addWidget(help_btn)
+
         top_layout.addStretch()
         root.addWidget(top_bar)
 
@@ -87,10 +147,32 @@ class CreatorWindow(QMainWindow):
         layers_panel.setStyleSheet(f"background-color: {PANEL_BG};")
         layers_layout = QVBoxLayout(layers_panel)
         layers_layout.setContentsMargins(8, 8, 8, 8)
-        layers_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         layers_header = QLabel("Layers")
         layers_header.setStyleSheet(f"font-size: 14px; color: {AEYIAN_BLUE}; background: transparent;")
         layers_layout.addWidget(layers_header)
+        layers_layout.addStretch()
+        add_layer_btn = QPushButton("+")
+        add_layer_btn.setFixedSize(32, 32)
+        add_layer_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_layer_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {BTN_BG};
+                color: #e1e1e1;
+                border: 1px solid {BTN_BORDER};
+                border-radius: 4px;
+                font-size: 18px;
+                font-weight: bold;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {BTN_HOVER};
+                border-color: #e1e1e1;
+            }}
+            QPushButton:pressed {{
+                background-color: #444444;
+            }}
+        """)
+        layers_layout.addWidget(add_layer_btn)
         splitter.addWidget(layers_panel)
 
         canvas = QFrame()

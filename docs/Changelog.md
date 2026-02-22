@@ -17,3 +17,13 @@
 - Calibration tool to test on bottom right.
 
 - **BUG 1** is fixed. **BUG 2** is still there.
+
+
+
+## Version: BCP-0.0.3
+
+- GUI main screen was added with dummy buttons and a method to save/edit projects. Project folder naming uses timestamp-based IDs (DDMMYYHHMMSS-XXX) instead of unique names.
+
+- GUI now has a dummy editor app launched from AWE's Edit button. 
+
+- Structuring the editor & plugin config files and also the scope.
