@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QPainter, QColor, QPixmap, QPolygonF
 from PySide6.QtCore import Qt, QPointF, QRectF
 
-from layers import AddLayerDialog, toggle_layer_visibility
+from layers import AddLayerDialog, resolve_hierarchy, toggle_layer_visibility
 
 #TODO: Pull the theme from config
 
@@ -183,7 +183,8 @@ class CanvasView(QWidget):
         if self._canvas_pixmap:
             painter.drawPixmap(canvas_rect.toAlignedRect(), self._canvas_pixmap)
 
-        for layer in self._layers:
+        render_layers = sorted(self._layers, key=lambda layer: layer.get("hierarchy", 0))
+        for layer in render_layers:
             if layer.get("id", 0) == 0:
                 continue
             if not layer.get("visible", True):
@@ -221,6 +222,9 @@ class CreatorWindow(QMainWindow):
         try:
             layers_data = json.loads((project_path / "layers.json").read_text())
             self._layers = layers_data.get("layers", [])
+            if resolve_hierarchy(self._layers):
+                layers_data["layers"] = self._layers
+                (project_path / "layers.json").write_text(json.dumps(layers_data, indent=2))
         except (json.JSONDecodeError, OSError):
             self._layers = []
 
@@ -305,7 +309,13 @@ class CreatorWindow(QMainWindow):
         layers_header.setStyleSheet(f"font-size: 14px; color: {AEYIAN_BLUE}; background: transparent;")
         layers_layout.addWidget(layers_header)
 
-        for layer in self._layers:
+        ordered_layers = sorted(
+            (layer for layer in self._layers if layer.get("id", 0) != 0),
+            key=lambda layer: layer.get("hierarchy", 0),
+            reverse=True,
+        )
+
+        for layer in ordered_layers:
             if layer.get("id", 0) == 0:
                 continue
             row_widget = QWidget()

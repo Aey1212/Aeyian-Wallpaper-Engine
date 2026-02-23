@@ -261,6 +261,7 @@ class MainWindow(QMainWindow):
                 },
                 {
                     "id": 1,
+                    "hierarchy": 1,
                     "name": "Background",
                     "type": "solid_color",
                     "color": "#ffffff",

@@ -27,3 +27,13 @@
 - GUI now has a dummy editor app launched from AWE's Edit button. 
 
 - Structuring the editor & plugin config files and also the scope.
+
+## Version: BCP-0.0.4
+
+- GUI restructuring and splitting big files into smaller files.
+
+- AWC and AWE integration is better.
+
+- AWC is getting it's layer based features.
+
+- Projects are now organized better.
