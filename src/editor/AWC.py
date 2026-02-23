@@ -8,10 +8,12 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QLabel, QVBoxLayout, QHBoxLayout, QFrame, QSplitter,
-    QPushButton, QMenu,
+    QPushButton, QMenu, QCheckBox,
 )
 from PySide6.QtGui import QPainter, QColor, QPixmap, QPolygonF
 from PySide6.QtCore import Qt, QPointF, QRectF
+
+from layers import AddLayerDialog, toggle_layer_visibility
 
 #TODO: Pull the theme from config
 
@@ -52,6 +54,26 @@ DARK_STYLE = f"""
     }}
     QMenu::item:selected {{
         background-color: {BTN_HOVER};
+    }}
+    QTreeWidget {{
+        background-color: #161616;
+        color: #e1e1e1;
+        border: none;
+        outline: none;
+    }}
+    QTreeWidget::item {{
+        padding: 4px;
+    }}
+    QTreeWidget::item:selected {{
+        background-color: {BTN_HOVER};
+    }}
+    QTreeWidget::branch {{
+        background-color: #161616;
+    }}
+    QCheckBox {{
+        color: #e1e1e1;
+        spacing: 6px;
+        background: transparent;
     }}
 """
 
@@ -173,6 +195,8 @@ class CanvasView(QWidget):
         for layer in self._layers:
             if layer.get("id", 0) == 0:
                 continue
+            if not layer.get("visible", True):
+                continue
             layer_type = layer.get("type", "")
             if layer_type == "solid_color":
                 pos = layer.get("position", {"x": 0, "y": 0})
@@ -284,9 +308,21 @@ class CreatorWindow(QMainWindow):
         for layer in self._layers:
             if layer.get("id", 0) == 0:
                 continue
-            row = QLabel(layer.get("name", f"Layer {layer['id']}"))
-            row.setStyleSheet("font-size: 12px; color: #e1e1e1; background: transparent; padding: 4px 0px;")
-            layers_layout.addWidget(row)
+            row_widget = QWidget()
+            row_widget.setStyleSheet("background: transparent;")
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 2, 0, 2)
+            row_layout.setSpacing(4)
+            cb = QCheckBox()
+            cb.setChecked(layer.get("visible", True))
+            layer_id = layer["id"]
+            cb.toggled.connect(lambda checked, lid=layer_id: self._on_visibility_toggled(lid, checked))
+            row_layout.addWidget(cb)
+            name_label = QLabel(layer.get("name", f"Layer {layer_id}"))
+            name_label.setStyleSheet("font-size: 12px; color: #e1e1e1; background: transparent;")
+            row_layout.addWidget(name_label)
+            row_layout.addStretch()
+            layers_layout.addWidget(row_widget)
 
         layers_layout.addStretch()
         add_layer_btn = QPushButton("+")
@@ -310,12 +346,13 @@ class CreatorWindow(QMainWindow):
                 background-color: #444444;
             }}
         """)
+        add_layer_btn.clicked.connect(self._on_add_layer)
         layers_layout.addWidget(add_layer_btn)
         splitter.addWidget(layers_panel)
 
-        canvas = CanvasView(self._project_path, self._layers)
-        canvas.setMinimumWidth(300)
-        splitter.addWidget(canvas)
+        self._canvas_view = CanvasView(self._project_path, self._layers)
+        self._canvas_view.setMinimumWidth(300)
+        splitter.addWidget(self._canvas_view)
 
         inspector_panel = QFrame()
         inspector_panel.setMinimumWidth(150)
@@ -333,6 +370,14 @@ class CreatorWindow(QMainWindow):
         splitter.setCollapsible(1, False)
         splitter.setCollapsible(2, False)
         root.addWidget(splitter, 1)
+
+    def _on_add_layer(self):
+        dialog = AddLayerDialog(self)
+        dialog.exec()
+
+    def _on_visibility_toggled(self, layer_id: int, visible: bool):
+        toggle_layer_visibility(self._project_path, self._layers, layer_id, visible)
+        self._canvas_view.update()
 
     def closeEvent(self, event):
         subprocess.Popen([sys.executable, str(AWE_PATH)])

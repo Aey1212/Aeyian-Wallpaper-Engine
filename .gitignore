@@ -20,6 +20,9 @@ qrc_*
 *.qmlc
 *.jsc
 
+# Python
+src/editor/layers/__pycache__/
+
 # OS files
 .DS_Store
 Thumbs.db

@@ -258,6 +258,7 @@ class MainWindow(QMainWindow):
                     "name": "Background",
                     "type": "solid_color",
                     "color": "#ffffff",
+                    "visible": True,
                     "position": {"x": 0, "y": 0},
                     "size": {
                         "width": values["width"],
