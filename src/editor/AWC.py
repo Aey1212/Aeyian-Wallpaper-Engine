@@ -90,31 +90,22 @@ HEX_RADIUS = 12
 
 class CanvasView(QWidget):
 
-    def __init__(self, project_path: Path, layers: list):
+    def __init__(self, project_path: Path, canvas_w: int, canvas_h: int, layers: list):
         super().__init__()
+        self._canvas_w = canvas_w
+        self._canvas_h = canvas_h
         self._layers = layers
         self._scale = 1.0
         self._offset_x = 0.0
         self._offset_y = 0.0
+        self._hex_cache = None
+        self._hex_cache_size = None
 
         canvas_path = project_path / "canvas.png"
         if canvas_path.exists():
             self._canvas_pixmap = QPixmap(str(canvas_path))
-            self._canvas_w = self._canvas_pixmap.width()
-            self._canvas_h = self._canvas_pixmap.height()
         else:
-            try:
-                data = json.loads((project_path / "project.json").read_text())
-                res = data.get("resolution", {})
-                self._canvas_w = res.get("width", 1920)
-                self._canvas_h = res.get("height", 1080)
-            except (json.JSONDecodeError, OSError):
-                self._canvas_w = 1920
-                self._canvas_h = 1080
             self._canvas_pixmap = None
-
-        self._hex_cache = None
-        self._hex_cache_size = None
 
     def _update_transform(self):
         padding = 20
@@ -219,9 +210,18 @@ class CreatorWindow(QMainWindow):
         try:
             data = json.loads((project_path / "project.json").read_text())
             self._project_name = data.get("name", project_path.name)
-            self._layers = data.get("layers", [])
+            res = data.get("resolution", {})
+            self._canvas_w = res.get("width", 1920)
+            self._canvas_h = res.get("height", 1080)
         except (json.JSONDecodeError, OSError):
             self._project_name = project_path.name
+            self._canvas_w = 1920
+            self._canvas_h = 1080
+
+        try:
+            layers_data = json.loads((project_path / "layers.json").read_text())
+            self._layers = layers_data.get("layers", [])
+        except (json.JSONDecodeError, OSError):
             self._layers = []
 
         self.setWindowTitle(f"AWC - {self._project_name}")
@@ -350,7 +350,7 @@ class CreatorWindow(QMainWindow):
         layers_layout.addWidget(add_layer_btn)
         splitter.addWidget(layers_panel)
 
-        self._canvas_view = CanvasView(self._project_path, self._layers)
+        self._canvas_view = CanvasView(self._project_path, self._canvas_w, self._canvas_h, self._layers)
         self._canvas_view.setMinimumWidth(300)
         splitter.addWidget(self._canvas_view)
 

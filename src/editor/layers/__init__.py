@@ -10,7 +10,7 @@ def toggle_layer_visibility(project_path: Path, layers: list, layer_id: int, vis
             layer["visible"] = visible
             break
 
-    manifest_path = project_path / "project.json"
-    data = json.loads(manifest_path.read_text())
+    layers_path = project_path / "layers.json"
+    data = json.loads(layers_path.read_text())
     data["layers"] = layers
-    manifest_path.write_text(json.dumps(data, indent=2))
+    layers_path.write_text(json.dumps(data, indent=2))

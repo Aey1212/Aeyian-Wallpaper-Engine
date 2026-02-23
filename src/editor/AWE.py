@@ -25,7 +25,7 @@ _WHICH = shutil.which
 PROJECTS_DIR = _HOME / ".local" / "share" / "interactive-wallpapers"
 CONFIG_PATH = _HOME / ".config" / "AWE.json" #TODO: actually use it.
 
-AWE_VERSION = "0.0.3" #TODO: actually pull from the fucking project.
+AWE_VERSION = "0.0.4" #TODO: actually pull from the fucking project.
 AEYIAN_BLUE = "#3A41E1"
 PLACEHOLDER_RED = "#e13b3e" # Let's hope people aren't stupid enough to not add pictures to their stuff
 
@@ -84,8 +84,8 @@ def generate_red_preview(path: Path):
     img.save(str(path))
 
 
-def generate_canvas(path: Path, width: int, height: int):
-    img = QImage(width, height, QImage.Format.Format_ARGB32)
+def generate_canvas(path: Path):
+    img = QImage(1, 1, QImage.Format.Format_ARGB32)
     img.fill(Qt.GlobalColor.transparent)
     img.save(str(path))
 
@@ -235,7 +235,7 @@ class MainWindow(QMainWindow):
         (project_dir / "assets").mkdir()
 
         generate_red_preview(project_dir / "preview.png")
-        generate_canvas(project_dir / "canvas.png", values["width"], values["height"])
+        generate_canvas(project_dir / "canvas.png")
 
         manifest = {
             "id": project_id,
@@ -246,12 +246,18 @@ class MainWindow(QMainWindow):
                 "width": values["width"],
                 "height": values["height"],
             },
+            "properties": {},
+        }
+        (project_dir / "project.json").write_text(
+            json.dumps(manifest, indent=2)
+        )
+
+        layers = {
             "layers": [
                 {
                     "id": 0,
                     "name": "Canvas",
                     "type": "canvas",
-                    "source": "canvas.png",
                 },
                 {
                     "id": 1,
@@ -266,10 +272,9 @@ class MainWindow(QMainWindow):
                     },
                 },
             ],
-            "properties": {},
         }
-        (project_dir / "project.json").write_text(
-            json.dumps(manifest, indent=2)
+        (project_dir / "layers.json").write_text(
+            json.dumps(layers, indent=2)
         )
 
         self._refresh_grid()

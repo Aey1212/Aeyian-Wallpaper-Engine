@@ -22,6 +22,7 @@ qrc_*
 
 # Python
 src/editor/layers/__pycache__/
+src/editor/__pycache__/
 
 # OS files
 .DS_Store
