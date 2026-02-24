@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QTreeWidget, QTreeWidgetItem,
+    QDialog, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QPushButton,
 )
 from PySide6.QtCore import Qt
 
@@ -22,23 +22,55 @@ class AddLayerDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Add Layer")
         self.setFixedSize(320, 300)
+        self._selected_layer_type = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        tree = QTreeWidget()
-        tree.setHeaderHidden(True)
-        tree.setRootIsDecorated(True)
-        tree.setIndentation(20)
+        self._tree = QTreeWidget()
+        self._tree.setHeaderHidden(True)
+        self._tree.setRootIsDecorated(True)
+        self._tree.setIndentation(20)
 
         for category, types in LAYER_TYPES.items():
             category_item = QTreeWidgetItem([category])
             category_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
-            tree.addTopLevelItem(category_item)
+            self._tree.addTopLevelItem(category_item)
             for layer_type in types:
                 child = QTreeWidgetItem([layer_type])
                 child.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
                 category_item.addChild(child)
             category_item.setExpanded(True)
 
-        layout.addWidget(tree)
+        self._tree.itemSelectionChanged.connect(self._on_selection_changed)
+
+        layout.addWidget(self._tree)
+
+        self._add_btn = QPushButton("Add Layer")
+        self._add_btn.setEnabled(False)
+        self._add_btn.clicked.connect(self._on_add_layer)
+        layout.addWidget(self._add_btn)
+
+    def _on_selection_changed(self):
+        items = self._tree.selectedItems()
+        if not items:
+            self._selected_layer_type = None
+            self._add_btn.setEnabled(False)
+            return
+
+        item = items[0]
+        if item.parent() is None:
+            self._selected_layer_type = None
+            self._add_btn.setEnabled(False)
+            return
+
+        self._selected_layer_type = item.text(0)
+        self._add_btn.setEnabled(True)
+
+    def _on_add_layer(self):
+        if self._selected_layer_type is None:
+            return
+        self.accept()
+
+    def get_selected_layer_type(self):
+        return self._selected_layer_type

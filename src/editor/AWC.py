@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import math
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -8,12 +9,16 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QLabel, QVBoxLayout, QHBoxLayout, QFrame, QSplitter,
-    QPushButton, QMenu, QCheckBox,
+    QPushButton, QMenu, QCheckBox, QSpinBox, QLineEdit,
+    QColorDialog, QFileDialog, QScrollArea, QFormLayout,
 )
 from PySide6.QtGui import QPainter, QColor, QPixmap, QPolygonF
 from PySide6.QtCore import Qt, QPointF, QRectF
 
-from layers import AddLayerDialog, resolve_hierarchy, toggle_layer_visibility
+from layers import (
+    AddLayerDialog, create_layer, resolve_hierarchy, toggle_layer_visibility,
+    get_schema_for_layer, get_nested, set_nested,
+)
 
 #TODO: Pull the theme from config
 
@@ -92,6 +97,7 @@ class CanvasView(QWidget):
 
     def __init__(self, project_path: Path, canvas_w: int, canvas_h: int, layers: list):
         super().__init__()
+        self._project_path = project_path
         self._canvas_w = canvas_w
         self._canvas_h = canvas_h
         self._layers = layers
@@ -100,12 +106,20 @@ class CanvasView(QWidget):
         self._offset_y = 0.0
         self._hex_cache = None
         self._hex_cache_size = None
+        self._image_cache = {}
 
         canvas_path = project_path / "canvas.png"
         if canvas_path.exists():
             self._canvas_pixmap = QPixmap(str(canvas_path))
         else:
             self._canvas_pixmap = None
+
+    def invalidate_image_cache(self, rel_path: str = None):
+        if rel_path is None:
+            self._image_cache.clear()
+        else:
+            full_path = str(self._project_path / rel_path)
+            self._image_cache.pop(full_path, None)
 
     def _update_transform(self):
         padding = 20
@@ -190,14 +204,26 @@ class CanvasView(QWidget):
             if not layer.get("visible", True):
                 continue
             layer_type = layer.get("type", "")
+            pos = layer.get("position", {"x": 0, "y": 0})
+            size = layer.get("size", {"width": self._canvas_w, "height": self._canvas_h})
+            lx = self._offset_x + pos["x"] * self._scale
+            ly = self._offset_y + pos["y"] * self._scale
+            lw = size["width"] * self._scale
+            lh = size["height"] * self._scale
+
             if layer_type == "solid_color":
-                pos = layer.get("position", {"x": 0, "y": 0})
-                size = layer.get("size", {"width": self._canvas_w, "height": self._canvas_h})
-                lx = self._offset_x + pos["x"] * self._scale
-                ly = self._offset_y + pos["y"] * self._scale
-                lw = size["width"] * self._scale
-                lh = size["height"] * self._scale
                 painter.fillRect(QRectF(lx, ly, lw, lh), QColor(layer.get("color", "#ffffff")))
+            elif layer_type == "image":
+                img_path = layer.get("image", "")
+                if img_path:
+                    full_path = str(self._project_path / img_path)
+                    if full_path not in self._image_cache:
+                        pm = QPixmap(full_path)
+                        if not pm.isNull():
+                            self._image_cache[full_path] = pm
+                    cached = self._image_cache.get(full_path)
+                    if cached:
+                        painter.drawPixmap(QRectF(lx, ly, lw, lh).toAlignedRect(), cached)
 
         painter.end()
 
@@ -227,6 +253,8 @@ class CreatorWindow(QMainWindow):
                 (project_path / "layers.json").write_text(json.dumps(layers_data, indent=2))
         except (json.JSONDecodeError, OSError):
             self._layers = []
+
+        self._selected_layer = None
 
         self.setWindowTitle(f"AWC - {self._project_name}")
         self.resize(1400, 900)
@@ -300,14 +328,69 @@ class CreatorWindow(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setStyleSheet("QSplitter::handle { background-color: #161954; width: 2px; }")
 
-        layers_panel = QFrame()
-        layers_panel.setMinimumWidth(100)
-        layers_panel.setStyleSheet(f"background-color: {PANEL_BG};")
-        layers_layout = QVBoxLayout(layers_panel)
-        layers_layout.setContentsMargins(8, 8, 8, 8)
+        self._layers_panel = QFrame()
+        self._layers_panel.setMinimumWidth(100)
+        self._layers_panel.setStyleSheet(f"background-color: {PANEL_BG};")
+        self._layers_layout = QVBoxLayout(self._layers_panel)
+        self._layers_layout.setContentsMargins(8, 8, 8, 8)
+        self._rebuild_layer_panel()
+        splitter.addWidget(self._layers_panel)
+
+        self._canvas_view = CanvasView(self._project_path, self._canvas_w, self._canvas_h, self._layers)
+        self._canvas_view.setMinimumWidth(300)
+        splitter.addWidget(self._canvas_view)
+
+        self._inspector_panel = QFrame()
+        self._inspector_panel.setMinimumWidth(150)
+        self._inspector_panel.setStyleSheet(f"background-color: {PANEL_BG};")
+        self._inspector_layout = QVBoxLayout(self._inspector_panel)
+        self._inspector_layout.setContentsMargins(8, 8, 8, 8)
+        self._rebuild_inspector()
+        splitter.addWidget(self._inspector_panel)
+
+        splitter.setSizes([200, 920, 280])
+        splitter.setCollapsible(0, False)
+        splitter.setCollapsible(1, False)
+        splitter.setCollapsible(2, False)
+        root.addWidget(splitter, 1)
+
+    def _on_add_layer(self):
+        dialog = AddLayerDialog(self)
+        if not dialog.exec():
+            return
+
+        selected_layer_type = dialog.get_selected_layer_type()
+        if not selected_layer_type:
+            return
+
+        self._layers.append(create_layer(self._layers, selected_layer_type, self._canvas_w, self._canvas_h))
+        resolve_hierarchy(self._layers)
+        self._save_layers()
+        self._rebuild_layer_panel()
+        self._canvas_view.update()
+
+    def _on_visibility_toggled(self, layer_id: int, visible: bool):
+        toggle_layer_visibility(self._project_path, self._layers, layer_id, visible)
+        self._canvas_view.update()
+
+    def _save_layers(self):
+        layers_path = self._project_path / "layers.json"
+        data = json.loads(layers_path.read_text())
+        data["layers"] = self._layers
+        layers_path.write_text(json.dumps(data, indent=2))
+
+    def _rebuild_layer_panel(self):
+        while self._layers_layout.count():
+            item = self._layers_layout.takeAt(0)
+            if item is None:
+                continue
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
         layers_header = QLabel("Layers")
         layers_header.setStyleSheet(f"font-size: 14px; color: {AEYIAN_BLUE}; background: transparent;")
-        layers_layout.addWidget(layers_header)
+        self._layers_layout.addWidget(layers_header)
 
         ordered_layers = sorted(
             (layer for layer in self._layers if layer.get("id", 0) != 0),
@@ -316,25 +399,28 @@ class CreatorWindow(QMainWindow):
         )
 
         for layer in ordered_layers:
-            if layer.get("id", 0) == 0:
-                continue
+            layer_id = layer["id"]
+            is_selected = self._selected_layer is not None and self._selected_layer.get("id") == layer_id
+            row_bg = "#2a2a3a" if is_selected else "transparent"
+
             row_widget = QWidget()
-            row_widget.setStyleSheet("background: transparent;")
+            row_widget.setStyleSheet(f"background: {row_bg};")
+            row_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+            row_widget.mousePressEvent = lambda e, lid=layer_id: self._on_layer_selected(lid)
             row_layout = QHBoxLayout(row_widget)
-            row_layout.setContentsMargins(0, 2, 0, 2)
+            row_layout.setContentsMargins(4, 2, 4, 2)
             row_layout.setSpacing(4)
             cb = QCheckBox()
             cb.setChecked(layer.get("visible", True))
-            layer_id = layer["id"]
             cb.toggled.connect(lambda checked, lid=layer_id: self._on_visibility_toggled(lid, checked))
             row_layout.addWidget(cb)
             name_label = QLabel(layer.get("name", f"Layer {layer_id}"))
             name_label.setStyleSheet("font-size: 12px; color: #e1e1e1; background: transparent;")
             row_layout.addWidget(name_label)
             row_layout.addStretch()
-            layers_layout.addWidget(row_widget)
+            self._layers_layout.addWidget(row_widget)
 
-        layers_layout.addStretch()
+        self._layers_layout.addStretch()
         add_layer_btn = QPushButton("+")
         add_layer_btn.setFixedSize(32, 32)
         add_layer_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -357,37 +443,136 @@ class CreatorWindow(QMainWindow):
             }}
         """)
         add_layer_btn.clicked.connect(self._on_add_layer)
-        layers_layout.addWidget(add_layer_btn)
-        splitter.addWidget(layers_panel)
+        self._layers_layout.addWidget(add_layer_btn)
 
-        self._canvas_view = CanvasView(self._project_path, self._canvas_w, self._canvas_h, self._layers)
-        self._canvas_view.setMinimumWidth(300)
-        splitter.addWidget(self._canvas_view)
+    def _on_layer_selected(self, layer_id: int):
+        self._selected_layer = None
+        for layer in self._layers:
+            if layer.get("id") == layer_id:
+                self._selected_layer = layer
+                break
+        self._rebuild_layer_panel()
+        self._rebuild_inspector()
 
-        inspector_panel = QFrame()
-        inspector_panel.setMinimumWidth(150)
-        inspector_panel.setStyleSheet(f"background-color: {PANEL_BG};")
-        inspector_layout = QVBoxLayout(inspector_panel)
-        inspector_layout.setContentsMargins(8, 8, 8, 8)
-        inspector_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+    def _rebuild_inspector(self):
+        while self._inspector_layout.count():
+            item = self._inspector_layout.takeAt(0)
+            if item is None:
+                continue
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
         inspector_header = QLabel("Inspector")
         inspector_header.setStyleSheet(f"font-size: 14px; color: {AEYIAN_BLUE}; background: transparent;")
-        inspector_layout.addWidget(inspector_header)
-        splitter.addWidget(inspector_panel)
+        self._inspector_layout.addWidget(inspector_header)
 
-        splitter.setSizes([200, 920, 280])
-        splitter.setCollapsible(0, False)
-        splitter.setCollapsible(1, False)
-        splitter.setCollapsible(2, False)
-        root.addWidget(splitter, 1)
+        if self._selected_layer is None:
+            self._inspector_layout.addStretch()
+            return
 
-    def _on_add_layer(self):
-        dialog = AddLayerDialog(self)
-        dialog.exec()
+        schema = get_schema_for_layer(self._selected_layer)
+        form = QFormLayout()
+        form.setSpacing(6)
 
-    def _on_visibility_toggled(self, layer_id: int, visible: bool):
-        toggle_layer_visibility(self._project_path, self._layers, layer_id, visible)
+        for entry in schema:
+            label = QLabel(entry["label"])
+            label.setStyleSheet("font-size: 12px; color: #aaa; background: transparent;")
+            widget = self._make_property_widget(entry)
+            if widget is not None:
+                form.addRow(label, widget)
+
+        form_container = QWidget()
+        form_container.setStyleSheet("background: transparent;")
+        form_container.setLayout(form)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(form_container)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        self._inspector_layout.addWidget(scroll, 1)
+
+    def _make_property_widget(self, entry: dict) -> QWidget | None:
+        key = entry["key"]
+        widget_type = entry["widget"]
+        current_value = get_nested(self._selected_layer, key)
+
+        if widget_type == "text":
+            widget = QLineEdit(str(current_value or ""))
+            widget.setStyleSheet("background: #2a2a2a; color: #e1e1e1; border: 1px solid #3a3a3a; padding: 3px;")
+            widget.editingFinished.connect(lambda k=key, w=widget: self._on_property_changed(k, w.text()))
+            return widget
+
+        if widget_type == "bool":
+            widget = QCheckBox()
+            widget.setChecked(bool(current_value))
+            widget.toggled.connect(lambda checked, k=key: self._on_property_changed(k, checked))
+            return widget
+
+        if widget_type == "int":
+            widget = QSpinBox()
+            widget.setRange(-999999, 999999)
+            widget.setValue(int(current_value or 0))
+            widget.setStyleSheet("background: #2a2a2a; color: #e1e1e1; border: 1px solid #3a3a3a; padding: 3px;")
+            widget.valueChanged.connect(lambda val, k=key: self._on_property_changed(k, val))
+            return widget
+
+        if widget_type == "color":
+            color_str = str(current_value or "#ffffff")
+            widget = QPushButton()
+            widget.setFixedHeight(24)
+            widget.setStyleSheet(f"background-color: {color_str}; border: 1px solid #3a3a3a;")
+            widget.clicked.connect(lambda _, k=key, w=widget, c=color_str: self._on_color_pick(k, w, c))
+            return widget
+
+        if widget_type == "file":
+            row = QWidget()
+            row.setStyleSheet("background: transparent;")
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(4)
+            line = QLineEdit(str(current_value or ""))
+            line.setStyleSheet("background: #2a2a2a; color: #e1e1e1; border: 1px solid #3a3a3a; padding: 3px;")
+            line.editingFinished.connect(lambda k=key, w=line: self._on_property_changed(k, w.text()))
+            row_layout.addWidget(line)
+            browse = QPushButton("...")
+            browse.setFixedWidth(28)
+            browse.clicked.connect(lambda _, k=key, w=line: self._on_file_browse(k, w))
+            row_layout.addWidget(browse)
+            return row
+
+        return None
+
+    def _on_property_changed(self, key: str, value):
+        if self._selected_layer is None:
+            return
+        set_nested(self._selected_layer, key, value)
+        self._save_layers()
+        if key == "name" or key == "visible":
+            self._rebuild_layer_panel()
         self._canvas_view.update()
+
+    def _on_color_pick(self, key: str, button: QPushButton, current: str):
+        color = QColorDialog.getColor(QColor(current), self, "Pick Color")
+        if not color.isValid():
+            return
+        hex_color = color.name()
+        button.setStyleSheet(f"background-color: {hex_color}; border: 1px solid #3a3a3a;")
+        self._on_property_changed(key, hex_color)
+
+    def _on_file_browse(self, key: str, line_edit: QLineEdit):
+        path, _ = QFileDialog.getOpenFileName(self, "Select File", str(Path.home()))
+        if not path:
+            return
+        src = Path(path)
+        layer_id = self._selected_layer.get("id")
+        dest_name = f"{layer_id}{src.suffix}"
+        dest = self._project_path / "assets" / dest_name
+        shutil.copy2(str(src), str(dest))
+        rel = f"assets/{dest_name}"
+        line_edit.setText(rel)
+        self._canvas_view.invalidate_image_cache(rel)
+        self._on_property_changed(key, rel)
 
     def closeEvent(self, event):
         subprocess.Popen([sys.executable, str(AWE_PATH)])
