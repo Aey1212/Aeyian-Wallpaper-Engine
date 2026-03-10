@@ -278,6 +278,11 @@ class MainWindow(QMainWindow):
             json.dumps(layers, indent=2)
         )
 
+        effects = {"effects": []}
+        (project_dir / "effects.json").write_text(
+            json.dumps(effects, indent=2)
+        )
+
         self._refresh_grid()
         self._select_project(project_dir)
 

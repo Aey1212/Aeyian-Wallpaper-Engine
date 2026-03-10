@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from .L_Dialog import AddLayerDialog, LAYER_TYPES
+from .L_Dialog import AddLayerDialog, AddEffectDialog, LAYER_TYPES
 
 
 SHARED_SCHEMA = [
@@ -156,3 +156,100 @@ def create_layer(layers: list, layer_type: str, canvas_w: int, canvas_h: int) ->
         "type": "solid_color",
         "color": "#ffffff",
     }
+
+
+# --- Effects ---
+
+EFFECT_TYPES = {
+    "Visual": [
+        "Grayscale",
+        "Gaussian Blur",
+        "Cursor Distortion",
+    ],
+}
+
+EFFECT_SCHEMAS = {
+    "grayscale": [
+        {"key": "params.strength", "label": "Strength", "widget": "float", "min": 0.0, "max": 1.0},
+    ],
+    "blur": [
+        {"key": "params.radius", "label": "Radius", "widget": "int", "min": 1, "max": 50},
+    ],
+    "distortion": [
+        {"key": "params.strength", "label": "Strength", "widget": "float", "min": 0.0, "max": 1.0},
+        {"key": "params.radius", "label": "Radius", "widget": "float", "min": 0.0, "max": 1.0},
+    ],
+}
+
+EFFECT_SHARED_SCHEMA = [
+    {"key": "name", "label": "Name", "widget": "text"},
+]
+
+EFFECT_TYPE_MAP = {
+    "Grayscale": ("grayscale", {"strength": 1.0}),
+    "Gaussian Blur": ("blur", {"radius": 5}),
+    "Cursor Distortion": ("distortion", {"strength": 0.5, "radius": 0.3}),
+}
+
+
+def create_effect(effects: list, layer_id: int, effect_type_name: str) -> dict:
+    max_id = 0
+    max_hierarchy = 0
+
+    for effect in effects:
+        eid = effect.get("id")
+        if isinstance(eid, int) and eid > max_id:
+            max_id = eid
+
+        if effect.get("layer_id") == layer_id:
+            hierarchy = effect.get("hierarchy")
+            if isinstance(hierarchy, int) and hierarchy > max_hierarchy:
+                max_hierarchy = hierarchy
+
+    new_id = max_id + 1
+    new_hierarchy = max_hierarchy + 1
+
+    type_key, default_params = EFFECT_TYPE_MAP.get(effect_type_name, ("grayscale", {"strength": 1.0}))
+
+    return {
+        "id": new_id,
+        "layer_id": layer_id,
+        "hierarchy": new_hierarchy,
+        "name": effect_type_name,
+        "type": type_key,
+        "params": dict(default_params),
+    }
+
+
+def resolve_effect_hierarchy(effects: list, layer_id: int) -> bool:
+    used = set()
+    highest = 0
+    changed = False
+
+    for effect in effects:
+        if effect.get("layer_id") != layer_id:
+            continue
+
+        hierarchy = effect.get("hierarchy")
+        if isinstance(hierarchy, int) and hierarchy > 0 and hierarchy not in used:
+            used.add(hierarchy)
+            if hierarchy > highest:
+                highest = hierarchy
+            continue
+
+        next_h = highest + 1
+        while next_h in used:
+            next_h += 1
+
+        effect["hierarchy"] = next_h
+        used.add(next_h)
+        highest = next_h
+        changed = True
+
+    return changed
+
+
+def get_schema_for_effect(effect: dict) -> list:
+    effect_type = effect.get("type", "")
+    type_schema = EFFECT_SCHEMAS.get(effect_type, [])
+    return EFFECT_SHARED_SCHEMA + type_schema

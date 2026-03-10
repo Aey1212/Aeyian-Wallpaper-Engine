@@ -9,15 +9,16 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QLabel, QVBoxLayout, QHBoxLayout, QFrame, QSplitter,
-    QPushButton, QMenu, QCheckBox, QSpinBox, QLineEdit,
+    QPushButton, QMenu, QCheckBox, QSpinBox, QDoubleSpinBox, QLineEdit,
     QColorDialog, QFileDialog, QScrollArea, QFormLayout,
 )
 from PySide6.QtGui import QPainter, QColor, QPixmap, QPolygonF
 from PySide6.QtCore import Qt, QPointF, QRectF
 
 from layers import (
-    AddLayerDialog, create_layer, resolve_hierarchy, toggle_layer_visibility,
-    get_schema_for_layer, get_nested, set_nested,
+    AddLayerDialog, AddEffectDialog, create_layer, create_effect,
+    resolve_hierarchy, resolve_effect_hierarchy, toggle_layer_visibility,
+    get_schema_for_layer, get_schema_for_effect, get_nested, set_nested,
 )
 
 #TODO: Pull the theme from config
@@ -254,6 +255,12 @@ class CreatorWindow(QMainWindow):
         except (json.JSONDecodeError, OSError):
             self._layers = []
 
+        try:
+            effects_data = json.loads((project_path / "effects.json").read_text())
+            self._effects = effects_data.get("effects", [])
+        except (json.JSONDecodeError, OSError):
+            self._effects = []
+
         self._selected_layer = None
 
         self.setWindowTitle(f"AWC - {self._project_name}")
@@ -471,50 +478,133 @@ class CreatorWindow(QMainWindow):
             self._inspector_layout.addStretch()
             return
 
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background: transparent;")
+        content_layout = QVBoxLayout(scroll_content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(6)
+
+        # Layer properties
         schema = get_schema_for_layer(self._selected_layer)
         form = QFormLayout()
         form.setSpacing(6)
-
         for entry in schema:
             label = QLabel(entry["label"])
             label.setStyleSheet("font-size: 12px; color: #aaa; background: transparent;")
-            widget = self._make_property_widget(entry)
+            widget = self._make_property_widget(entry, self._selected_layer, self._on_property_changed)
             if widget is not None:
                 form.addRow(label, widget)
+        form_wrapper = QWidget()
+        form_wrapper.setStyleSheet("background: transparent;")
+        form_wrapper.setLayout(form)
+        content_layout.addWidget(form_wrapper)
 
-        form_container = QWidget()
-        form_container.setStyleSheet("background: transparent;")
-        form_container.setLayout(form)
+        # Separator
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("color: #3a3a3a;")
+        content_layout.addWidget(sep)
+
+        # Effects header + add button
+        effects_header_row = QWidget()
+        effects_header_row.setStyleSheet("background: transparent;")
+        effects_header_layout = QHBoxLayout(effects_header_row)
+        effects_header_layout.setContentsMargins(0, 0, 0, 0)
+        effects_label = QLabel("Effects")
+        effects_label.setStyleSheet(f"font-size: 13px; color: {AEYIAN_BLUE}; background: transparent;")
+        effects_header_layout.addWidget(effects_label)
+        effects_header_layout.addStretch()
+        add_effect_btn = QPushButton("+")
+        add_effect_btn.setFixedSize(24, 24)
+        add_effect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_effect_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {BTN_BG}; color: #e1e1e1;
+                border: 1px solid {BTN_BORDER}; border-radius: 4px;
+                font-size: 14px; font-weight: bold; padding: 0px;
+            }}
+            QPushButton:hover {{ background-color: {BTN_HOVER}; }}
+        """)
+        add_effect_btn.clicked.connect(self._on_add_effect)
+        effects_header_layout.addWidget(add_effect_btn)
+        content_layout.addWidget(effects_header_row)
+
+        # Effects for this layer
+        layer_id = self._selected_layer.get("id")
+        layer_effects = sorted(
+            (e for e in self._effects if e.get("layer_id") == layer_id),
+            key=lambda e: e.get("hierarchy", 0),
+        )
+
+        for effect in layer_effects:
+            effect_frame = QFrame()
+            effect_frame.setStyleSheet(f"background: #1a1a2a; border: 1px solid #2a2a3a; border-radius: 4px;")
+            effect_layout = QVBoxLayout(effect_frame)
+            effect_layout.setContentsMargins(6, 4, 6, 4)
+            effect_layout.setSpacing(4)
+
+            effect_name = QLabel(f"{effect.get('hierarchy', '?')}. {effect.get('name', 'Effect')}")
+            effect_name.setStyleSheet(f"font-size: 12px; color: #e1e1e1; background: transparent; border: none;")
+            effect_layout.addWidget(effect_name)
+
+            effect_schema = get_schema_for_effect(effect)
+            effect_form = QFormLayout()
+            effect_form.setSpacing(4)
+            effect_cb = lambda k, v, eff=effect: self._on_effect_property_changed(eff, k, v)
+            for entry in effect_schema:
+                label = QLabel(entry["label"])
+                label.setStyleSheet("font-size: 11px; color: #888; background: transparent; border: none;")
+                widget = self._make_property_widget(entry, effect, effect_cb)
+                if widget is not None:
+                    effect_form.addRow(label, widget)
+            effect_form_wrapper = QWidget()
+            effect_form_wrapper.setStyleSheet("background: transparent; border: none;")
+            effect_form_wrapper.setLayout(effect_form)
+            effect_layout.addWidget(effect_form_wrapper)
+
+            content_layout.addWidget(effect_frame)
+
+        content_layout.addStretch()
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setWidget(form_container)
+        scroll.setWidget(scroll_content)
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         self._inspector_layout.addWidget(scroll, 1)
 
-    def _make_property_widget(self, entry: dict) -> QWidget | None:
+    def _make_property_widget(self, entry: dict, data_source: dict, callback) -> QWidget | None:
         key = entry["key"]
         widget_type = entry["widget"]
-        current_value = get_nested(self._selected_layer, key)
+        current_value = get_nested(data_source, key)
 
         if widget_type == "text":
             widget = QLineEdit(str(current_value or ""))
             widget.setStyleSheet("background: #2a2a2a; color: #e1e1e1; border: 1px solid #3a3a3a; padding: 3px;")
-            widget.editingFinished.connect(lambda k=key, w=widget: self._on_property_changed(k, w.text()))
+            widget.editingFinished.connect(lambda k=key, w=widget, cb=callback: cb(k, w.text()))
             return widget
 
         if widget_type == "bool":
             widget = QCheckBox()
             widget.setChecked(bool(current_value))
-            widget.toggled.connect(lambda checked, k=key: self._on_property_changed(k, checked))
+            widget.toggled.connect(lambda checked, k=key, cb=callback: cb(k, checked))
             return widget
 
         if widget_type == "int":
             widget = QSpinBox()
-            widget.setRange(-999999, 999999)
+            widget.setRange(entry.get("min", -999999), entry.get("max", 999999))
             widget.setValue(int(current_value or 0))
             widget.setStyleSheet("background: #2a2a2a; color: #e1e1e1; border: 1px solid #3a3a3a; padding: 3px;")
-            widget.valueChanged.connect(lambda val, k=key: self._on_property_changed(k, val))
+            widget.valueChanged.connect(lambda val, k=key, cb=callback: cb(k, val))
+            return widget
+
+        if widget_type == "float":
+            widget = QDoubleSpinBox()
+            widget.setRange(entry.get("min", 0.0), entry.get("max", 1.0))
+            widget.setSingleStep(0.05)
+            widget.setDecimals(2)
+            widget.setValue(float(current_value or 0.0))
+            widget.setStyleSheet("background: #2a2a2a; color: #e1e1e1; border: 1px solid #3a3a3a; padding: 3px;")
+            widget.valueChanged.connect(lambda val, k=key, cb=callback: cb(k, val))
             return widget
 
         if widget_type == "color":
@@ -522,7 +612,7 @@ class CreatorWindow(QMainWindow):
             widget = QPushButton()
             widget.setFixedHeight(24)
             widget.setStyleSheet(f"background-color: {color_str}; border: 1px solid #3a3a3a;")
-            widget.clicked.connect(lambda _, k=key, w=widget, c=color_str: self._on_color_pick(k, w, c))
+            widget.clicked.connect(lambda _, k=key, w=widget, c=color_str, cb=callback: self._on_color_pick(k, w, c, cb))
             return widget
 
         if widget_type == "file":
@@ -533,7 +623,7 @@ class CreatorWindow(QMainWindow):
             row_layout.setSpacing(4)
             line = QLineEdit(str(current_value or ""))
             line.setStyleSheet("background: #2a2a2a; color: #e1e1e1; border: 1px solid #3a3a3a; padding: 3px;")
-            line.editingFinished.connect(lambda k=key, w=line: self._on_property_changed(k, w.text()))
+            line.editingFinished.connect(lambda k=key, w=line, cb=callback: cb(k, w.text()))
             row_layout.addWidget(line)
             browse = QPushButton("...")
             browse.setFixedWidth(28)
@@ -552,13 +642,14 @@ class CreatorWindow(QMainWindow):
             self._rebuild_layer_panel()
         self._canvas_view.update()
 
-    def _on_color_pick(self, key: str, button: QPushButton, current: str):
+    def _on_color_pick(self, key: str, button: QPushButton, current: str, callback=None):
         color = QColorDialog.getColor(QColor(current), self, "Pick Color")
         if not color.isValid():
             return
         hex_color = color.name()
         button.setStyleSheet(f"background-color: {hex_color}; border: 1px solid #3a3a3a;")
-        self._on_property_changed(key, hex_color)
+        cb = callback or self._on_property_changed
+        cb(key, hex_color)
 
     def _on_file_browse(self, key: str, line_edit: QLineEdit):
         path, _ = QFileDialog.getOpenFileName(self, "Select File", str(Path.home()))
@@ -573,6 +664,30 @@ class CreatorWindow(QMainWindow):
         line_edit.setText(rel)
         self._canvas_view.invalidate_image_cache(rel)
         self._on_property_changed(key, rel)
+
+    def _on_add_effect(self):
+        if self._selected_layer is None:
+            return
+        dialog = AddEffectDialog(self)
+        if not dialog.exec():
+            return
+        selected_effect_type = dialog.get_selected_effect_type()
+        if not selected_effect_type:
+            return
+        layer_id = self._selected_layer.get("id")
+        new_effect = create_effect(self._effects, layer_id, selected_effect_type)
+        self._effects.append(new_effect)
+        resolve_effect_hierarchy(self._effects, layer_id)
+        self._save_effects()
+        self._rebuild_inspector()
+
+    def _on_effect_property_changed(self, effect: dict, key: str, value):
+        set_nested(effect, key, value)
+        self._save_effects()
+
+    def _save_effects(self):
+        effects_path = self._project_path / "effects.json"
+        effects_path.write_text(json.dumps({"effects": self._effects}, indent=2))
 
     def closeEvent(self, event):
         subprocess.Popen([sys.executable, str(AWE_PATH)])
