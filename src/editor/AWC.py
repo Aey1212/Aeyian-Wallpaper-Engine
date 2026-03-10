@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QPushButton, QMenu, QCheckBox, QSpinBox, QDoubleSpinBox, QLineEdit,
     QColorDialog, QFileDialog, QScrollArea, QFormLayout,
 )
-from PySide6.QtGui import QPainter, QColor, QPixmap, QPolygonF
+from PySide6.QtGui import QPainter, QColor, QPixmap, QPolygonF, QImage
 from PySide6.QtCore import Qt, QPointF, QRectF
 
 from layers import (
@@ -227,6 +227,40 @@ class CanvasView(QWidget):
                         painter.drawPixmap(QRectF(lx, ly, lw, lh).toAlignedRect(), cached)
 
         painter.end()
+
+    def render_to_image(self) -> QImage:
+        img = QImage(self._canvas_w, self._canvas_h, QImage.Format.Format_ARGB32)
+        img.fill(QColor("#ffffff"))
+        painter = QPainter(img)
+
+        render_layers = sorted(self._layers, key=lambda layer: layer.get("hierarchy", 0))
+        for layer in render_layers:
+            if layer.get("id", 0) == 0:
+                continue
+            if not layer.get("visible", True):
+                continue
+            layer_type = layer.get("type", "")
+            pos = layer.get("position", {"x": 0, "y": 0})
+            size = layer.get("size", {"width": self._canvas_w, "height": self._canvas_h})
+            lx, ly = pos["x"], pos["y"]
+            lw, lh = size["width"], size["height"]
+
+            if layer_type == "solid_color":
+                painter.fillRect(QRectF(lx, ly, lw, lh), QColor(layer.get("color", "#ffffff")))
+            elif layer_type == "image":
+                img_path = layer.get("image", "")
+                if img_path:
+                    full_path = str(self._project_path / img_path)
+                    cached = self._image_cache.get(full_path)
+                    if not cached:
+                        pm = QPixmap(full_path)
+                        if not pm.isNull():
+                            cached = pm
+                    if cached:
+                        painter.drawPixmap(QRectF(lx, ly, lw, lh).toAlignedRect(), cached)
+
+        painter.end()
+        return img
 
 
 class CreatorWindow(QMainWindow):
@@ -690,6 +724,9 @@ class CreatorWindow(QMainWindow):
         effects_path.write_text(json.dumps({"effects": self._effects}, indent=2))
 
     def closeEvent(self, event):
+        preview = self._canvas_view.render_to_image()
+        preview = preview.scaled(160, 90, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        preview.save(str(self._project_path / "preview.png"))
         subprocess.Popen([sys.executable, str(AWE_PATH)])
         event.accept()
 
