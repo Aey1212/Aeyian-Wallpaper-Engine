@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import org.aey.wallpaperengine 1.0
 
 Item {
     id: configRoot
@@ -8,21 +9,98 @@ Item {
     property var configDialog
     property var wallpaperConfiguration: wallpaper.configuration
 
+    FileReader { id: fileReader }
+
+    property string wallpapersPath: fileReader.homePath() + "/.local/share/interactive-wallpapers"
+    property var projectList: []
+
+    Component.onCompleted: scanProjects()
+
+    function scanProjects() {
+        var folders = fileReader.listDirs(wallpapersPath)
+        var projects = []
+        for (var i = 0; i < folders.length; i++) {
+            var folderPath = wallpapersPath + "/" + folders[i]
+            var raw = fileReader.readFile(folderPath + "/project.json")
+            if (!raw) continue
+            try {
+                var data = JSON.parse(raw)
+                projects.push({
+                    name: data.name || "Unnamed",
+                    id: data.id || "",
+                    path: folderPath
+                })
+            } catch(e) {
+                continue
+            }
+        }
+        projectList = projects
+        projectGrid.model = projectList
+    }
+
     RowLayout {
         anchors.fill: parent
         spacing: 0
 
-        // Wallpapers here
+        // Wallpaper choosing thing
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            color: "#1e1e1e" // Reverse white
+            color: "#1e1e1e"
 
-            Text {
-                anchors.centerIn: parent
-                text: "Content Area"
-                color: "#e1e1e1"
-                font.pixelSize: 16
+            GridView {
+                id: projectGrid
+                anchors.fill: parent
+                anchors.margins: 12
+                cellWidth: 180
+                cellHeight: 160
+                clip: true
+
+                delegate: Item {
+                    width: projectGrid.cellWidth
+                    height: projectGrid.cellHeight
+
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.margins: 6
+                        radius: 6
+                        color: wallpaperConfiguration.selectedProject === modelData.path ? "#3A41E1" : "#2a2a2a"
+                        border.color: wallpaperConfiguration.selectedProject === modelData.path ? "#5A61FF" : "#3a3a3a"
+                        border.width: 1
+
+                        Column {
+                            anchors.fill: parent
+                            anchors.margins: 6
+                            spacing: 4
+
+                            Image {
+                                width: parent.width
+                                height: parent.height - nameLabel.height - 4
+                                source: "file://" + modelData.path + "/preview.png"
+                                fillMode: Image.PreserveAspectFit
+                                asynchronous: true
+                            }
+
+                            Text {
+                                id: nameLabel
+                                width: parent.width
+                                text: modelData.name
+                                color: "#e1e1e1"
+                                font.pixelSize: 12
+                                horizontalAlignment: Text.AlignHCenter
+                                elide: Text.ElideRight
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                wallpaperConfiguration.selectedProject = modelData.path
+                            }
+                        }
+                    }
+                }
             }
         }
 

@@ -12,6 +12,7 @@ pkg_check_modules(LIBINPUT REQUIRED libinput libudev)
 add_library(aeyian-wallpaper-plugin MODULE
     plugin.cpp
     cursorprovider.cpp
+    filereader.h
 )
 
 target_link_libraries(aeyian-wallpaper-plugin

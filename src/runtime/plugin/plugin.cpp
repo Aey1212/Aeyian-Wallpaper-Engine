@@ -1,6 +1,7 @@
 #include <QQmlExtensionPlugin>
 #include <QQmlEngine>
 #include "cursorprovider.h"
+#include "filereader.h"
 
 class AeyianWallpaperPlugin : public QQmlExtensionPlugin
 {
@@ -11,6 +12,7 @@ public:
     void registerTypes(const char *uri) override
     {
         qmlRegisterType<CursorProvider>(uri, 1, 0, "CursorProvider");
+        qmlRegisterType<FileReader>(uri, 1, 0, "FileReader");
     }
 };
 
