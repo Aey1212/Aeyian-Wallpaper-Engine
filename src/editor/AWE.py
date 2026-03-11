@@ -271,6 +271,8 @@ class MainWindow(QMainWindow):
                         "width": values["width"],
                         "height": values["height"],
                     },
+                    "speed": 0,
+                    "limit": {"x": 0, "y": 0},
                 },
             ],
         }

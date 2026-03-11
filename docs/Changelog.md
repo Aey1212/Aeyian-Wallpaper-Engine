@@ -37,3 +37,9 @@
 - AWC is getting it's layer based features.
 
 - Projects are now organized better.
+
+- Layer hierarchy system, Layer creation, Layer selection is done.
+
+- Effects show in inspector below layer properties (not functional yet).
+
+- Preview thumbnail generation.

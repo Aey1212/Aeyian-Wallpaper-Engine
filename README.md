@@ -18,8 +18,8 @@ Bring Wallpaper Engine-like functionality to Linux natively:
 
 **Early Development**
 - Tracks simulated cursor and calibrates periodically to fix drift
-- Configure option at the plugin page to be integrated with the GUI later
-- Non-integrated GUI app is available at the project
+- Configure option at the plugin page integrated with the GUI
+- A demo GUI app is available at the project
 
 ## Target Platform
 

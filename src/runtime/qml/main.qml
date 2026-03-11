@@ -41,7 +41,16 @@ WallpaperItem {
         }
     }
 
-    // Fallback background when no project is selected
+    function calcOffset(mouseNorm, speed, limitPct, layerSize) {
+        if (speed === 0 || limitPct === 0) return 0
+        var mc = mouseNorm - 0.5
+        var totalTravel = layerSize * (limitPct / 100)
+        var halfTravel = totalTravel / 2
+        var raw = mc * speed * totalTravel
+        return Math.max(-halfTravel, Math.min(halfTravel, raw))
+    }
+
+    // Fallback so gotta keep it
     Rectangle {
         anchors.fill: parent
         color: "#3A41E1" // hehe aeyian color go brrr!
@@ -72,10 +81,14 @@ WallpaperItem {
         id: solidColorComponent
 
         Rectangle {
-            x: (layerData.position ? layerData.position.x : 0)
-            y: (layerData.position ? layerData.position.y : 0)
             width: (layerData.size ? layerData.size.width : root.width)
             height: (layerData.size ? layerData.size.height : root.height)
+            x: (layerData.position ? layerData.position.x : 0)
+               + root.calcOffset(cursor.mouseX, layerData.speed || 0,
+                                  layerData.limit ? layerData.limit.x || 0 : 0, width)
+            y: (layerData.position ? layerData.position.y : 0)
+               + root.calcOffset(cursor.mouseY, layerData.speed || 0,
+                                  layerData.limit ? layerData.limit.y || 0 : 0, height)
             color: layerData.color || "#ffffff"
         }
     }
@@ -84,10 +97,14 @@ WallpaperItem {
         id: imageComponent
 
         Image {
-            x: (layerData.position ? layerData.position.x : 0)
-            y: (layerData.position ? layerData.position.y : 0)
             width: (layerData.size ? layerData.size.width : root.width)
             height: (layerData.size ? layerData.size.height : root.height)
+            x: (layerData.position ? layerData.position.x : 0)
+               + root.calcOffset(cursor.mouseX, layerData.speed || 0,
+                                  layerData.limit ? layerData.limit.x || 0 : 0, width)
+            y: (layerData.position ? layerData.position.y : 0)
+               + root.calcOffset(cursor.mouseY, layerData.speed || 0,
+                                  layerData.limit ? layerData.limit.y || 0 : 0, height)
             source: layerData.image ? ("file://" + selectedProject + "/" + layerData.image) : ""
             fillMode: Image.Stretch
             asynchronous: true

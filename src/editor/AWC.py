@@ -18,6 +18,7 @@ from PySide6.QtCore import Qt, QPointF, QRectF
 from layers import (
     AddLayerDialog, AddEffectDialog, create_layer, create_effect,
     resolve_hierarchy, resolve_effect_hierarchy, toggle_layer_visibility,
+    swap_layer_order, delete_layer,
     get_schema_for_layer, get_schema_for_effect, get_nested, set_nested,
 )
 
@@ -414,6 +415,28 @@ class CreatorWindow(QMainWindow):
         toggle_layer_visibility(self._project_path, self._layers, layer_id, visible)
         self._canvas_view.update()
 
+    def _on_layer_move(self, layer_id: int, direction: str):
+        if swap_layer_order(self._layers, layer_id, direction):
+            self._save_layers()
+            self._rebuild_layer_panel()
+            self._canvas_view.update()
+
+    def _on_layer_delete(self, layer_id: int):
+        if self._selected_layer and self._selected_layer.get("id") == layer_id:
+            self._selected_layer = None
+        for layer in self._layers:
+            if layer.get("id") == layer_id:
+                img = layer.get("image") or layer.get("video")
+                if img:
+                    self._canvas_view.invalidate_image_cache(img)
+                break
+        delete_layer(self._project_path, self._layers, self._effects, layer_id)
+        self._save_layers()
+        self._save_effects()
+        self._rebuild_layer_panel()
+        self._rebuild_inspector()
+        self._canvas_view.update()
+
     def _save_layers(self):
         layers_path = self._project_path / "layers.json"
         data = json.loads(layers_path.read_text())
@@ -439,7 +462,23 @@ class CreatorWindow(QMainWindow):
             reverse=True,
         )
 
-        for layer in ordered_layers:
+        layer_btn_style = f"""
+            QPushButton {{
+                background: transparent; border: none;
+                color: #888; font-size: 12px; padding: 0px;
+            }}
+            QPushButton:hover {{ color: #e1e1e1; }}
+            QPushButton:disabled {{ color: #333; }}
+        """
+        delete_btn_style = f"""
+            QPushButton {{
+                background: transparent; border: none;
+                color: #888; font-size: 12px; padding: 0px;
+            }}
+            QPushButton:hover {{ color: #e13b3e; }}
+        """
+
+        for i, layer in enumerate(ordered_layers):
             layer_id = layer["id"]
             is_selected = self._selected_layer is not None and self._selected_layer.get("id") == layer_id
             row_bg = "#2a2a3a" if is_selected else "transparent"
@@ -459,6 +498,27 @@ class CreatorWindow(QMainWindow):
             name_label.setStyleSheet("font-size: 12px; color: #e1e1e1; background: transparent;")
             row_layout.addWidget(name_label)
             row_layout.addStretch()
+
+            up_btn = QPushButton("▲")
+            up_btn.setFixedSize(20, 20)
+            up_btn.setStyleSheet(layer_btn_style)
+            up_btn.setEnabled(i > 0)
+            up_btn.clicked.connect(lambda _, lid=layer_id: self._on_layer_move(lid, "up"))
+            row_layout.addWidget(up_btn)
+
+            del_btn = QPushButton("✕")
+            del_btn.setFixedSize(20, 20)
+            del_btn.setStyleSheet(delete_btn_style)
+            del_btn.clicked.connect(lambda _, lid=layer_id: self._on_layer_delete(lid))
+            row_layout.addWidget(del_btn)
+
+            down_btn = QPushButton("▼")
+            down_btn.setFixedSize(20, 20)
+            down_btn.setStyleSheet(layer_btn_style)
+            down_btn.setEnabled(i < len(ordered_layers) - 1)
+            down_btn.clicked.connect(lambda _, lid=layer_id: self._on_layer_move(lid, "down"))
+            row_layout.addWidget(down_btn)
+
             self._layers_layout.addWidget(row_widget)
 
         self._layers_layout.addStretch()

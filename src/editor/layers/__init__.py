@@ -11,6 +11,9 @@ SHARED_SCHEMA = [
     {"key": "position.y", "label": "Y", "widget": "int"},
     {"key": "size.width", "label": "Width", "widget": "int"},
     {"key": "size.height", "label": "Height", "widget": "int"},
+    {"key": "speed", "label": "Speed", "widget": "float", "min": -10.0, "max": 10.0},
+    {"key": "limit.x", "label": "Limit X", "widget": "float", "min": 0.0, "max": 1000.0},
+    {"key": "limit.y", "label": "Limit Y", "widget": "float", "min": 0.0, "max": 1000.0},
 ]
 
 TYPE_SCHEMAS = {
@@ -92,6 +95,41 @@ def resolve_hierarchy(layers: list) -> bool:
     return changed
 
 
+def swap_layer_order(layers: list, layer_id: int, direction: str) -> bool:
+    ordered = sorted(
+        (l for l in layers if l.get("type") != "canvas" and l.get("id") != 0),
+        key=lambda l: l.get("hierarchy", 0),
+    )
+    target_idx = None
+    for i, l in enumerate(ordered):
+        if l.get("id") == layer_id:
+            target_idx = i
+            break
+    if target_idx is None:
+        return False
+
+    if direction == "up" and target_idx < len(ordered) - 1:
+        neighbor = ordered[target_idx + 1]
+    elif direction == "down" and target_idx > 0:
+        neighbor = ordered[target_idx - 1]
+    else:
+        return False
+
+    target = ordered[target_idx]
+    target["hierarchy"], neighbor["hierarchy"] = neighbor["hierarchy"], target["hierarchy"]
+    return True
+
+
+def delete_layer(project_path: Path, layers: list, effects: list, layer_id: int):
+    layers[:] = [l for l in layers if l.get("id") != layer_id]
+    effects[:] = [e for e in effects if e.get("layer_id") != layer_id]
+    assets_dir = project_path / "assets"
+    if assets_dir.exists():
+        for f in assets_dir.iterdir():
+            if f.stem == str(layer_id):
+                f.unlink()
+
+
 def create_layer(layers: list, layer_type: str, canvas_w: int, canvas_h: int) -> dict:
     max_id = 0
     max_hierarchy = 0
@@ -117,6 +155,8 @@ def create_layer(layers: list, layer_type: str, canvas_w: int, canvas_h: int) ->
         "visible": True,
         "position": {"x": 0, "y": 0},
         "size": {"width": canvas_w, "height": canvas_h},
+        "speed": 0,
+        "limit": {"x": 0, "y": 0},
     }
 
     if layer_type == "Color Layer":
