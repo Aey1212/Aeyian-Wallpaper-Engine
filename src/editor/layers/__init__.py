@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from .L_Dialog import AddLayerDialog, AddEffectDialog, LAYER_TYPES
+from . import Effects
 
 
 SHARED_SCHEMA = [
@@ -198,41 +199,10 @@ def create_layer(layers: list, layer_type: str, canvas_w: int, canvas_h: int) ->
     }
 
 
-# --- Effects ---
-
-EFFECT_TYPES = {
-    "Visual": [
-        "Grayscale",
-        "Gaussian Blur",
-        "Cursor Distortion",
-    ],
-}
-
-EFFECT_SCHEMAS = {
-    "grayscale": [
-        {"key": "params.strength", "label": "Strength", "widget": "float", "min": 0.0, "max": 1.0},
-    ],
-    "blur": [
-        {"key": "params.radius", "label": "Radius", "widget": "int", "min": 1, "max": 50},
-    ],
-    "distortion": [
-        {"key": "params.strength", "label": "Strength", "widget": "float", "min": 0.0, "max": 1.0},
-        {"key": "params.radius", "label": "Radius", "widget": "float", "min": 0.0, "max": 1.0},
-    ],
-}
-
-EFFECT_SHARED_SCHEMA = [
-    {"key": "name", "label": "Name", "widget": "text"},
-]
-
-EFFECT_TYPE_MAP = {
-    "Grayscale": ("grayscale", {"strength": 1.0}),
-    "Gaussian Blur": ("blur", {"radius": 5}),
-    "Cursor Distortion": ("distortion", {"strength": 0.5, "radius": 0.3}),
-}
+# --- Effects wuz here ---
 
 
-def create_effect(effects: list, layer_id: int, effect_type_name: str) -> dict:
+def create_effect(effects: list, layer_id: int, layer_type: str, effect_type_name: str) -> dict:
     max_id = 0
     max_hierarchy = 0
 
@@ -249,7 +219,7 @@ def create_effect(effects: list, layer_id: int, effect_type_name: str) -> dict:
     new_id = max_id + 1
     new_hierarchy = max_hierarchy + 1
 
-    type_key, default_params = EFFECT_TYPE_MAP.get(effect_type_name, ("grayscale", {"strength": 1.0}))
+    type_key, default_params = Effects.get_type_map_entry(layer_type, effect_type_name)
 
     return {
         "id": new_id,
@@ -289,7 +259,24 @@ def resolve_effect_hierarchy(effects: list, layer_id: int) -> bool:
     return changed
 
 
+def delete_effect(effects: list, effect_id: int):
+    layer_id = None
+    for e in effects:
+        if e.get("id") == effect_id:
+            layer_id = e.get("layer_id")
+            break
+
+    effects[:] = [e for e in effects if e.get("id") != effect_id]
+
+    if layer_id is not None:
+        layer_effects = sorted(
+            (e for e in effects if e.get("layer_id") == layer_id),
+            key=lambda e: e.get("hierarchy", 0),
+        )
+        for i, e in enumerate(layer_effects):
+            e["hierarchy"] = i + 1
+
+
 def get_schema_for_effect(effect: dict) -> list:
     effect_type = effect.get("type", "")
-    type_schema = EFFECT_SCHEMAS.get(effect_type, [])
-    return EFFECT_SHARED_SCHEMA + type_schema
+    return Effects.get_schema(effect_type)

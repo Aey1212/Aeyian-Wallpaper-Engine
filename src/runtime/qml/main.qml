@@ -1,4 +1,5 @@
 import QtQuick
+import Qt5Compat.GraphicalEffects
 import org.kde.plasma.plasmoid
 import org.aey.wallpaperengine 1.0 // My beloved wayland mouse cursor plugin!
 
@@ -15,30 +16,89 @@ WallpaperItem {
 
     property string selectedProject: root.configuration.selectedProject ?? ""
     property var layersData: []
+    property var effectsData: []
+    property var blurMap: []
 
     onSelectedProjectChanged: loadProject()
-    Component.onCompleted: loadProject()
+    Component.onCompleted: {
+        loadBlurMap()
+        loadProject()
+    }
+
+    function loadBlurMap() {
+        var raw = fileReader.readFile(
+            fileReader.homePath()
+            + "/.config/aeyian-wallpaper-engine/blur_transliteration.json"
+        )
+        if (raw) {
+            try {
+                var data = JSON.parse(raw)
+                blurMap = data.gaussian_to_fastblur || []
+            } catch(e) {
+                blurMap = []
+            }
+        }
+    }
+
+    function translateBlurRadius(gaussianRadius) {
+        if (blurMap.length === 0) return gaussianRadius
+        var idx = Math.floor(gaussianRadius)
+        if (idx < 0) return 0
+        if (idx >= blurMap.length - 1) return blurMap[blurMap.length - 1]
+        var frac = gaussianRadius - idx
+        return blurMap[idx] + (blurMap[idx + 1] - blurMap[idx]) * frac
+    }
 
     function loadProject() {
         if (!selectedProject) {
             layersData = []
+            effectsData = []
             return
         }
-        var raw = fileReader.readFile(selectedProject + "/layers.json")
-        if (!raw) {
+
+        // Load layers
+        var rawLayers = fileReader.readFile(selectedProject + "/layers.json")
+        if (!rawLayers) {
             layersData = []
-            return
+        } else {
+            try {
+                var ld = JSON.parse(rawLayers)
+                var layers = ld.layers || []
+                layers.sort(function(a, b) {
+                    return (a.hierarchy || 0) - (b.hierarchy || 0)
+                })
+                layersData = layers
+            } catch(e) {
+                layersData = []
+            }
         }
-        try {
-            var data = JSON.parse(raw)
-            var layers = data.layers || []
-            layers.sort(function(a, b) {
-                return (a.hierarchy || 0) - (b.hierarchy || 0)
-            })
-            layersData = layers
-        } catch(e) {
-            layersData = []
+
+        // Load effects
+        var rawEffects = fileReader.readFile(selectedProject + "/effects.json")
+        if (!rawEffects) {
+            effectsData = []
+        } else {
+            try {
+                var ed = JSON.parse(rawEffects)
+                effectsData = ed.effects || []
+            } catch(e) {
+                effectsData = []
+            }
         }
+    }
+
+    // ID check for layers & effects
+    function getLayerEffects(layerId) {
+        var result = []
+        for (var i = 0; i < effectsData.length; i++) {
+            if (effectsData[i].layer_id === layerId) {
+                result.push(effectsData[i])
+            }
+        }
+        result.sort(function(a, b) {
+            return (a.hierarchy || 0) - (b.hierarchy || 0)
+        })
+        return result
     }
 
     function calcOffset(mouseNorm, speed, limitPct, layerSize) {
@@ -77,6 +137,7 @@ WallpaperItem {
         }
     }
 
+
     Component {
         id: solidColorComponent
 
@@ -93,10 +154,16 @@ WallpaperItem {
         }
     }
 
+
     Component {
         id: imageComponent
 
-        Image {
+        Item {
+            id: imageRoot
+
+            property var myEffects: root.getLayerEffects(layerData.id)
+            property var _effectObjects: []
+
             width: (layerData.size ? layerData.size.width : root.width)
             height: (layerData.size ? layerData.size.height : root.height)
             x: (layerData.position ? layerData.position.x : 0)
@@ -105,9 +172,123 @@ WallpaperItem {
             y: (layerData.position ? layerData.position.y : 0)
                + root.calcOffset(cursor.mouseY, layerData.speed || 0,
                                   layerData.limit ? layerData.limit.y || 0 : 0, height)
-            source: layerData.image ? ("file://" + selectedProject + "/" + layerData.image) : ""
-            fillMode: Image.Stretch
-            asynchronous: true
+
+
+            Image {
+                id: baseImage
+                anchors.fill: parent
+                source: layerData.image
+                    ? ("file://" + selectedProject + "/" + layerData.image) : ""
+                fillMode: Image.Stretch
+                asynchronous: true
+                visible: imageRoot.myEffects.length === 0
+                layer.enabled: imageRoot.myEffects.length > 0
+            }
+
+            onMyEffectsChanged: rebuildEffectChain()
+            Component.onCompleted: rebuildEffectChain()
+
+            function rebuildEffectChain() {
+                for (var i = 0; i < _effectObjects.length; i++) {
+                    _effectObjects[i].destroy()
+                }
+                _effectObjects = []
+
+                if (myEffects.length === 0) return
+
+                var prevSource = baseImage
+                for (var j = 0; j < myEffects.length; j++) {
+                    var fx = myEffects[j]
+                    var params = fx.params || {}
+                    var isLast = (j === myEffects.length - 1)
+                    var obj = createEffect(fx.type, params, prevSource, isLast)
+                    if (obj) {
+                        _effectObjects.push(obj)
+                        prevSource = obj
+                    }
+                }
+            }
+
+            function createEffect(effectType, params, src, isLast) {
+                var qml = ""
+
+                if (effectType === "grayscale") {
+                    var strength = params.strength !== undefined ? params.strength : 1.0
+                    qml = 'import QtQuick; import Qt5Compat.GraphicalEffects;'
+                        + ' Desaturate {'
+                        + ' anchors.fill: parent;'
+                        + ' desaturation: ' + strength + ';'
+                        + ' visible: ' + isLast + ';'
+                        + ' }'
+                }
+                else if (effectType === "hue_shift") {
+                    var shift = params.shift !== undefined ? params.shift : 0.0
+                    qml = 'import QtQuick; import Qt5Compat.GraphicalEffects;'
+                        + ' HueSaturation {'
+                        + ' anchors.fill: parent;'
+                        + ' hue: ' + shift + ';'
+                        + ' saturation: 0.0; lightness: 0.0;'
+                        + ' visible: ' + isLast + ';'
+                        + ' }'
+                }
+                else if (effectType === "saturation") {
+                    var sat = params.strength !== undefined ? (params.strength - 1.0) : 0.0
+                    qml = 'import QtQuick; import Qt5Compat.GraphicalEffects;'
+                        + ' HueSaturation {'
+                        + ' anchors.fill: parent;'
+                        + ' saturation: ' + sat + ';'
+                        + ' hue: 0.0; lightness: 0.0;'
+                        + ' visible: ' + isLast + ';'
+                        + ' }'
+                }
+                else if (effectType === "brightness") {
+                    var brt = params.brightness !== undefined ? params.brightness : 0.0
+                    qml = 'import QtQuick; import Qt5Compat.GraphicalEffects;'
+                        + ' BrightnessContrast {'
+                        + ' anchors.fill: parent;'
+                        + ' brightness: ' + brt + ';'
+                        + ' contrast: 0.0;'
+                        + ' visible: ' + isLast + ';'
+                        + ' }'
+                }
+                else if (effectType === "tint") {
+                    var tintColor = params.color || "#ffffff"
+                    var tintStrength = params.strength !== undefined ? params.strength : 0.5
+                    var alpha = Math.round(tintStrength * 255)
+                    var alphaHex = ("0" + alpha.toString(16)).slice(-2)
+                    var rgb = tintColor.replace(/^#/, "").slice(0, 6)
+                    var argbColor = "#" + alphaHex + rgb
+                    qml = 'import QtQuick; import Qt5Compat.GraphicalEffects;'
+                        + ' ColorOverlay {'
+                        + ' anchors.fill: parent;'
+                        + ' color: "' + argbColor + '";'
+                        + ' visible: ' + isLast + ';'
+                        + ' }'
+                }
+                else if (effectType === "blur") {
+                    var rawRadius = params.radius !== undefined ? params.radius : 5
+                    var radius = root.translateBlurRadius(rawRadius)
+                    qml = 'import QtQuick; import Qt5Compat.GraphicalEffects;'
+                        + ' FastBlur {'
+                        + ' anchors.fill: parent;'
+                        + ' radius: ' + radius + ';'
+                        + ' visible: ' + isLast + ';'
+                        + ' }'
+                }
+                else {
+                    // Unknown type means skip - don't talk to strangers
+                    return null
+                }
+
+                try {
+                    var obj = Qt.createQmlObject(qml, imageRoot, "effect_" + effectType)
+                    obj.source = src
+                    return obj
+                } catch(e) {
+                    console.warn("AWE: Failed to create effect:", effectType, e)
+                    return null
+                }
+            }
         }
     }
 

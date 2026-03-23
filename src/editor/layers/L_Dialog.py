@@ -76,22 +76,18 @@ class AddLayerDialog(QDialog):
         return self._selected_layer_type
 
 
-EFFECT_DIALOG_TYPES = {
-    "Visual": [
-        "Grayscale",
-        "Gaussian Blur",
-        "Cursor Distortion",
-    ],
-}
-
-
 class AddEffectDialog(QDialog):
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, layer_type: str = ""):
         super().__init__(parent)
         self.setWindowTitle("Add Effect")
-        self.setFixedSize(320, 260)
+        self.setFixedSize(320, 300)
         self._selected_effect_type = None
+
+        # DON'T change wher you import. It fucking breaks
+        from . import Effects
+
+        effect_types = Effects.get_dialog_types(layer_type)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -101,7 +97,7 @@ class AddEffectDialog(QDialog):
         self._tree.setRootIsDecorated(True)
         self._tree.setIndentation(20)
 
-        for category, types in EFFECT_DIALOG_TYPES.items():
+        for category, types in effect_types.items():
             category_item = QTreeWidgetItem([category])
             category_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self._tree.addTopLevelItem(category_item)

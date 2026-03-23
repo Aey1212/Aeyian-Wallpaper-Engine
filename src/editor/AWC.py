@@ -13,13 +13,14 @@ from PySide6.QtWidgets import (
     QColorDialog, QFileDialog, QScrollArea, QFormLayout,
 )
 from PySide6.QtGui import QPainter, QColor, QPixmap, QPolygonF, QImage
-from PySide6.QtCore import Qt, QPointF, QRectF
+from PySide6.QtCore import Qt, QPointF, QRectF, QTimer
 
 from layers import (
     AddLayerDialog, AddEffectDialog, create_layer, create_effect,
     resolve_hierarchy, resolve_effect_hierarchy, toggle_layer_visibility,
-    swap_layer_order, delete_layer,
+    swap_layer_order, delete_layer, delete_effect,
     get_schema_for_layer, get_schema_for_effect, get_nested, set_nested,
+    Effects,
 )
 
 #TODO: Pull the theme from config
@@ -97,18 +98,24 @@ HEX_RADIUS = 12
 
 class CanvasView(QWidget):
 
-    def __init__(self, project_path: Path, canvas_w: int, canvas_h: int, layers: list):
+    def __init__(self, project_path: Path, canvas_w: int, canvas_h: int, layers: list, effects: list):
         super().__init__()
         self._project_path = project_path
         self._canvas_w = canvas_w
         self._canvas_h = canvas_h
         self._layers = layers
+        self._effects = effects
         self._scale = 1.0
         self._offset_x = 0.0
         self._offset_y = 0.0
         self._hex_cache = None
         self._hex_cache_size = None
         self._image_cache = {}
+        self._dirty = False
+        self._tick_timer = QTimer(self)
+        self._tick_timer.setInterval(16)  # ~60fps
+        self._tick_timer.timeout.connect(self._on_tick)
+        self._tick_timer.start()
 
         canvas_path = project_path / "canvas.png"
         if canvas_path.exists():
@@ -122,6 +129,14 @@ class CanvasView(QWidget):
         else:
             full_path = str(self._project_path / rel_path)
             self._image_cache.pop(full_path, None)
+
+    def request_update(self):
+        self._dirty = True
+
+    def _on_tick(self):
+        if self._dirty:
+            self._dirty = False
+            self.update()
 
     def _update_transform(self):
         padding = 20
@@ -225,7 +240,15 @@ class CanvasView(QWidget):
                             self._image_cache[full_path] = pm
                     cached = self._image_cache.get(full_path)
                     if cached:
-                        painter.drawPixmap(QRectF(lx, ly, lw, lh).toAlignedRect(), cached)
+                        layer_effects = sorted(
+                            (e for e in self._effects if e.get("layer_id") == layer.get("id")),
+                            key=lambda e: e.get("hierarchy", 0),
+                        )
+                        if layer_effects:
+                            processed = Effects.apply_effects_to_image(layer_effects, cached.toImage())
+                            painter.drawImage(QRectF(lx, ly, lw, lh).toAlignedRect(), processed)
+                        else:
+                            painter.drawPixmap(QRectF(lx, ly, lw, lh).toAlignedRect(), cached)
 
         painter.end()
 
@@ -258,7 +281,15 @@ class CanvasView(QWidget):
                         if not pm.isNull():
                             cached = pm
                     if cached:
-                        painter.drawPixmap(QRectF(lx, ly, lw, lh).toAlignedRect(), cached)
+                        layer_effects = sorted(
+                            (e for e in self._effects if e.get("layer_id") == layer.get("id")),
+                            key=lambda e: e.get("hierarchy", 0),
+                        )
+                        if layer_effects:
+                            processed = Effects.apply_effects_to_image(layer_effects, cached.toImage())
+                            painter.drawImage(QRectF(lx, ly, lw, lh).toAlignedRect(), processed)
+                        else:
+                            painter.drawPixmap(QRectF(lx, ly, lw, lh).toAlignedRect(), cached)
 
         painter.end()
         return img
@@ -378,7 +409,7 @@ class CreatorWindow(QMainWindow):
         self._rebuild_layer_panel()
         splitter.addWidget(self._layers_panel)
 
-        self._canvas_view = CanvasView(self._project_path, self._canvas_w, self._canvas_h, self._layers)
+        self._canvas_view = CanvasView(self._project_path, self._canvas_w, self._canvas_h, self._layers, self._effects)
         self._canvas_view.setMinimumWidth(300)
         splitter.addWidget(self._canvas_view)
 
@@ -409,17 +440,17 @@ class CreatorWindow(QMainWindow):
         resolve_hierarchy(self._layers)
         self._save_layers()
         self._rebuild_layer_panel()
-        self._canvas_view.update()
+        self._canvas_view.request_update()
 
     def _on_visibility_toggled(self, layer_id: int, visible: bool):
         toggle_layer_visibility(self._project_path, self._layers, layer_id, visible)
-        self._canvas_view.update()
+        self._canvas_view.request_update()
 
     def _on_layer_move(self, layer_id: int, direction: str):
         if swap_layer_order(self._layers, layer_id, direction):
             self._save_layers()
             self._rebuild_layer_panel()
-            self._canvas_view.update()
+            self._canvas_view.request_update()
 
     def _on_layer_delete(self, layer_id: int):
         if self._selected_layer and self._selected_layer.get("id") == layer_id:
@@ -435,7 +466,7 @@ class CreatorWindow(QMainWindow):
         self._save_effects()
         self._rebuild_layer_panel()
         self._rebuild_inspector()
-        self._canvas_view.update()
+        self._canvas_view.request_update()
 
     def _save_layers(self):
         layers_path = self._project_path / "layers.json"
@@ -593,70 +624,96 @@ class CreatorWindow(QMainWindow):
         form_wrapper.setLayout(form)
         content_layout.addWidget(form_wrapper)
 
-        # Separator
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color: #3a3a3a;")
-        content_layout.addWidget(sep)
+        # Effects section
+        layer_type = self._selected_layer.get("type", "")
+        if Effects.has_effects(layer_type):
+            # Separator
+            sep = QFrame()
+            sep.setFrameShape(QFrame.Shape.HLine)
+            sep.setStyleSheet("color: #3a3a3a;")
+            content_layout.addWidget(sep)
 
-        # Effects header + add button
-        effects_header_row = QWidget()
-        effects_header_row.setStyleSheet("background: transparent;")
-        effects_header_layout = QHBoxLayout(effects_header_row)
-        effects_header_layout.setContentsMargins(0, 0, 0, 0)
-        effects_label = QLabel("Effects")
-        effects_label.setStyleSheet(f"font-size: 13px; color: {AEYIAN_BLUE}; background: transparent;")
-        effects_header_layout.addWidget(effects_label)
-        effects_header_layout.addStretch()
-        add_effect_btn = QPushButton("+")
-        add_effect_btn.setFixedSize(24, 24)
-        add_effect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        add_effect_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {BTN_BG}; color: #e1e1e1;
-                border: 1px solid {BTN_BORDER}; border-radius: 4px;
-                font-size: 14px; font-weight: bold; padding: 0px;
-            }}
-            QPushButton:hover {{ background-color: {BTN_HOVER}; }}
-        """)
-        add_effect_btn.clicked.connect(self._on_add_effect)
-        effects_header_layout.addWidget(add_effect_btn)
-        content_layout.addWidget(effects_header_row)
+            # Effects header and adder and possibly some other things
+            effects_header_row = QWidget()
+            effects_header_row.setStyleSheet("background: transparent;")
+            effects_header_layout = QHBoxLayout(effects_header_row)
+            effects_header_layout.setContentsMargins(0, 0, 0, 0)
+            effects_label = QLabel("Effects")
+            effects_label.setStyleSheet(f"font-size: 13px; color: {AEYIAN_BLUE}; background: transparent;")
+            effects_header_layout.addWidget(effects_label)
+            effects_header_layout.addStretch()
+            add_effect_btn = QPushButton("+")
+            add_effect_btn.setFixedSize(24, 24)
+            add_effect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            add_effect_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {BTN_BG}; color: #e1e1e1;
+                    border: 1px solid {BTN_BORDER}; border-radius: 4px;
+                    font-size: 14px; font-weight: bold; padding: 0px;
+                }}
+                QPushButton:hover {{ background-color: {BTN_HOVER}; }}
+            """)
+            add_effect_btn.clicked.connect(self._on_add_effect)
+            effects_header_layout.addWidget(add_effect_btn)
+            content_layout.addWidget(effects_header_row)
 
-        # Effects for this layer
-        layer_id = self._selected_layer.get("id")
-        layer_effects = sorted(
-            (e for e in self._effects if e.get("layer_id") == layer_id),
-            key=lambda e: e.get("hierarchy", 0),
-        )
+            # Effects for this layer
+            layer_id = self._selected_layer.get("id")
+            layer_effects = sorted(
+                (e for e in self._effects if e.get("layer_id") == layer_id),
+                key=lambda e: e.get("hierarchy", 0),
+            )
 
-        for effect in layer_effects:
-            effect_frame = QFrame()
-            effect_frame.setStyleSheet(f"background: #1a1a2a; border: 1px solid #2a2a3a; border-radius: 4px;")
-            effect_layout = QVBoxLayout(effect_frame)
-            effect_layout.setContentsMargins(6, 4, 6, 4)
-            effect_layout.setSpacing(4)
+            for effect in layer_effects:
+                effect_frame = QFrame()
+                effect_frame.setStyleSheet(f"background: #1a1a2a; border: 1px solid #2a2a3a; border-radius: 4px;")
+                effect_layout = QVBoxLayout(effect_frame)
+                effect_layout.setContentsMargins(6, 4, 6, 4)
+                effect_layout.setSpacing(4)
 
-            effect_name = QLabel(f"{effect.get('hierarchy', '?')}. {effect.get('name', 'Effect')}")
-            effect_name.setStyleSheet(f"font-size: 12px; color: #e1e1e1; background: transparent; border: none;")
-            effect_layout.addWidget(effect_name)
+                effect_header = QWidget()
+                effect_header.setStyleSheet("background: transparent; border: none;")
+                effect_header_layout = QHBoxLayout(effect_header)
+                effect_header_layout.setContentsMargins(0, 0, 0, 0)
+                effect_header_layout.setSpacing(4)
 
-            effect_schema = get_schema_for_effect(effect)
-            effect_form = QFormLayout()
-            effect_form.setSpacing(4)
-            effect_cb = lambda k, v, eff=effect: self._on_effect_property_changed(eff, k, v)
-            for entry in effect_schema:
-                label = QLabel(entry["label"])
-                label.setStyleSheet("font-size: 11px; color: #888; background: transparent; border: none;")
-                widget = self._make_property_widget(entry, effect, effect_cb)
-                if widget is not None:
-                    effect_form.addRow(label, widget)
-            effect_form_wrapper = QWidget()
-            effect_form_wrapper.setStyleSheet("background: transparent; border: none;")
-            effect_form_wrapper.setLayout(effect_form)
-            effect_layout.addWidget(effect_form_wrapper)
+                effect_name = QLabel(f"{effect.get('hierarchy', '?')}. {effect.get('name', 'Effect')}")
+                effect_name.setStyleSheet(f"font-size: 12px; color: #e1e1e1; background: transparent; border: none;")
+                effect_header_layout.addWidget(effect_name)
+                effect_header_layout.addStretch()
 
-            content_layout.addWidget(effect_frame)
+                del_effect_btn = QPushButton("✕")
+                del_effect_btn.setFixedSize(18, 18)
+                del_effect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                del_effect_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background: transparent; border: none;
+                        color: #888; font-size: 11px; padding: 0px;
+                    }}
+                    QPushButton:hover {{ color: #e13b3e; }}
+                """)
+                eid = effect.get("id")
+                del_effect_btn.clicked.connect(lambda _, e_id=eid: self._on_delete_effect(e_id))
+                effect_header_layout.addWidget(del_effect_btn)
+
+                effect_layout.addWidget(effect_header)
+
+                effect_schema = get_schema_for_effect(effect)
+                effect_form = QFormLayout()
+                effect_form.setSpacing(4)
+                effect_cb = lambda k, v, eff=effect: self._on_effect_property_changed(eff, k, v)
+                for entry in effect_schema:
+                    label = QLabel(entry["label"])
+                    label.setStyleSheet("font-size: 11px; color: #888; background: transparent; border: none;")
+                    widget = self._make_property_widget(entry, effect, effect_cb)
+                    if widget is not None:
+                        effect_form.addRow(label, widget)
+                effect_form_wrapper = QWidget()
+                effect_form_wrapper.setStyleSheet("background: transparent; border: none;")
+                effect_form_wrapper.setLayout(effect_form)
+                effect_layout.addWidget(effect_form_wrapper)
+
+                content_layout.addWidget(effect_frame)
 
         content_layout.addStretch()
 
@@ -734,7 +791,7 @@ class CreatorWindow(QMainWindow):
         self._save_layers()
         if key == "name" or key == "visible":
             self._rebuild_layer_panel()
-        self._canvas_view.update()
+        self._canvas_view.request_update()
 
     def _on_color_pick(self, key: str, button: QPushButton, current: str, callback=None):
         color = QColorDialog.getColor(QColor(current), self, "Pick Color")
@@ -762,22 +819,30 @@ class CreatorWindow(QMainWindow):
     def _on_add_effect(self):
         if self._selected_layer is None:
             return
-        dialog = AddEffectDialog(self)
+        layer_type = self._selected_layer.get("type", "")
+        dialog = AddEffectDialog(self, layer_type=layer_type)
         if not dialog.exec():
             return
         selected_effect_type = dialog.get_selected_effect_type()
         if not selected_effect_type:
             return
         layer_id = self._selected_layer.get("id")
-        new_effect = create_effect(self._effects, layer_id, selected_effect_type)
+        new_effect = create_effect(self._effects, layer_id, layer_type, selected_effect_type)
         self._effects.append(new_effect)
         resolve_effect_hierarchy(self._effects, layer_id)
         self._save_effects()
         self._rebuild_inspector()
 
+    def _on_delete_effect(self, effect_id: int):
+        delete_effect(self._effects, effect_id)
+        self._save_effects()
+        self._rebuild_inspector()
+        self._canvas_view.request_update()
+
     def _on_effect_property_changed(self, effect: dict, key: str, value):
         set_nested(effect, key, value)
         self._save_effects()
+        self._canvas_view.request_update()
 
     def _save_effects(self):
         effects_path = self._project_path / "effects.json"
