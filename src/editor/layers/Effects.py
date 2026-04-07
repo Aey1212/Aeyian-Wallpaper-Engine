@@ -313,7 +313,7 @@ def _apply_hue_shift(img: QImage, params: dict) -> QImage:
     return result
 
 
-def _oversaturate_chunk(args):
+def _oversaturate_rgb_chunk(args):
 
     data, strength = args
     buf = bytearray(data)
@@ -326,95 +326,14 @@ def _oversaturate_chunk(args):
         g = (px >> 8) & 0xFF
         b = px & 0xFF
 
-        # --- inlined RGB to HSL ---
-        rf = r / 255.0
-        gf = g / 255.0
-        bf = b / 255.0
-        if rf > gf:
-            cmax = rf; cmin = gf
-        else:
-            cmax = gf; cmin = rf
-        if bf > cmax:
-            cmax = bf
-        elif bf < cmin:
-            cmin = bf
-        delta = cmax - cmin
+        # Rec.709 luminance (same weights as GLSL shader)
+        gray = r * 0.2125 + g * 0.7154 + b * 0.0721
 
-        if delta == 0.0:
-            continue  # achromatic
+        # Extrapolate: mix(gray, channel, strength)
+        rn = _int(gray + (r - gray) * strength)
+        gn = _int(gray + (g - gray) * strength)
+        bn = _int(gray + (b - gray) * strength)
 
-        l = (cmax + cmin) * 0.5
-        if l < 0.5:
-            s = delta / (cmax + cmin)
-        else:
-            s = delta / (2.0 - cmax - cmin)
-
-        if cmax == rf:
-            h = ((gf - bf) / delta) % 6.0
-        elif cmax == gf:
-            h = (bf - rf) / delta + 2.0
-        else:
-            h = (rf - gf) / delta + 4.0
-        h = h * 60.0
-        if h < 0.0:
-            h += 360.0
-
-        h = _int(h)
-        s_boosted = _int(s * 1000.0 * strength)
-        if s_boosted > 1000:
-            s_boosted = 1000
-        l = _int(l * 1000.0)
-
-        # --- inlined HSL to RGB ---
-        lf = l * 0.001
-        sf = s_boosted * 0.001
-        if lf < 0.5:
-            c2 = lf * (1.0 + sf)
-        else:
-            c2 = lf + sf - lf * sf
-        c1 = 2.0 * lf - c2
-        hf = h / 360.0
-
-        # R channel
-        t = hf + 0.3333333333333333
-        if t > 1.0:
-            t -= 1.0
-        if t < 0.16666666666666666:
-            rn = c1 + (c2 - c1) * 6.0 * t
-        elif t < 0.5:
-            rn = c2
-        elif t < 0.6666666666666666:
-            rn = c1 + (c2 - c1) * (0.6666666666666666 - t) * 6.0
-        else:
-            rn = c1
-
-        # G channel
-        t = hf
-        if t < 0.16666666666666666:
-            gn = c1 + (c2 - c1) * 6.0 * t
-        elif t < 0.5:
-            gn = c2
-        elif t < 0.6666666666666666:
-            gn = c1 + (c2 - c1) * (0.6666666666666666 - t) * 6.0
-        else:
-            gn = c1
-
-        # B chanel
-        t = hf - 0.3333333333333333
-        if t < 0.0:
-            t += 1.0
-        if t < 0.16666666666666666:
-            bn = c1 + (c2 - c1) * 6.0 * t
-        elif t < 0.5:
-            bn = c2
-        elif t < 0.6666666666666666:
-            bn = c1 + (c2 - c1) * (0.6666666666666666 - t) * 6.0
-        else:
-            bn = c1
-
-        rn = _int(rn * 255.0)
-        gn = _int(gn * 255.0)
-        bn = _int(bn * 255.0)
         pixels[idx] = (px & 0xFF000000) | \
             ((0 if rn < 0 else 255 if rn > 255 else rn) << 16) | \
             ((0 if gn < 0 else 255 if gn > 255 else gn) << 8) | \
@@ -451,7 +370,7 @@ def _apply_saturation(img: QImage, params: dict) -> QImage:
         for i in range(0, n_bytes, chunk_size):
             tasks.append((raw[i:i + chunk_size], strength))
 
-        parts = list(_pool.map(_oversaturate_chunk, tasks))
+        parts = list(_pool.map(_oversaturate_rgb_chunk, tasks))
 
         dest = memoryview(result.bits()).cast('B')
         offset = 0
