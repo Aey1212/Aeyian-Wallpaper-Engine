@@ -146,6 +146,48 @@ Item {
                     }
                 }
 
+                Rectangle {
+                    Layout.preferredWidth: 120
+                    Layout.preferredHeight: 40
+                    Layout.alignment: Qt.AlignHCenter
+                    color: "white"
+                    radius: 4
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: (wallpaperConfiguration.showCoordinates ?? true) ? "Hide Coords" : "Show Coords"
+                        font.pixelSize: 14
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            wallpaperConfiguration.showCoordinates = !(wallpaperConfiguration.showCoordinates ?? true)
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.preferredWidth: 120
+                    Layout.preferredHeight: 40
+                    Layout.alignment: Qt.AlignHCenter
+                    color: "white"
+                    radius: 4
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: (wallpaperConfiguration.showCursorFollower ?? true) ? "Hide Follower" : "Show Follower"
+                        font.pixelSize: 14
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            wallpaperConfiguration.showCursorFollower = !(wallpaperConfiguration.showCursorFollower ?? true)
+                        }
+                    }
+                }
+
                 Item { Layout.fillHeight: true }
             }
         }

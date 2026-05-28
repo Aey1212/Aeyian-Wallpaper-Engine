@@ -300,6 +300,7 @@ WallpaperItem {
         color: "#e1e1e1" // white go brr!
         font.pixelSize: 14
         z: 9999
+        visible: root.configuration.showCoordinates ?? true
     }
 
     // Calibrate button is instant thanks to this
@@ -319,5 +320,6 @@ WallpaperItem {
         x: cursor.mouseX * parent.width - 20
         y: cursor.mouseY * parent.height - 20
         z: 9998
+        visible: root.configuration.showCursorFollower ?? true
     }
 }

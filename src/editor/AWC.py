@@ -12,8 +12,8 @@ from PySide6.QtWidgets import (
     QPushButton, QMenu, QCheckBox, QSpinBox, QDoubleSpinBox, QLineEdit,
     QColorDialog, QFileDialog, QScrollArea, QFormLayout,
 )
-from PySide6.QtGui import QPainter, QColor, QPixmap, QPolygonF, QImage
-from PySide6.QtCore import Qt, QPointF, QRectF, QTimer
+from PySide6.QtGui import QPainter, QColor, QPixmap, QPolygonF, QImage, QPen
+from PySide6.QtCore import Qt, QPointF, QRectF, QTimer, Signal
 
 from layers import (
     AddLayerDialog, AddEffectDialog, create_layer, create_effect,
@@ -98,6 +98,8 @@ HEX_RADIUS = 12
 
 class CanvasView(QWidget):
 
+    preview_state_changed = Signal()
+
     def __init__(self, project_path: Path, canvas_w: int, canvas_h: int, layers: list, effects: list):
         super().__init__()
         self._project_path = project_path
@@ -105,17 +107,34 @@ class CanvasView(QWidget):
         self._canvas_h = canvas_h
         self._layers = layers
         self._effects = effects
+        self._base_scale = 1.0
+        self._user_zoom = 1.0
+        self._pan_x = 0.0
+        self._pan_y = 0.0
+        self._panning = False
+        self._pan_start = None
+        self._pan_origin = (0.0, 0.0)
         self._scale = 1.0
         self._offset_x = 0.0
         self._offset_y = 0.0
         self._hex_cache = None
         self._hex_cache_size = None
         self._image_cache = {}
+        self._effect_cache = {}
+        self._effect_cache_order = []
+        self._EFFECT_CACHE_CAP = 16
+        self._frame_hue = 0.0
+        self._playing = False
+        self._preview_time = 0.0
+        self._sim_cursor = QPointF(0.5, 0.5)
+        self._track_cursor = False
         self._dirty = False
         self._tick_timer = QTimer(self)
         self._tick_timer.setInterval(16)  # ~60fps
         self._tick_timer.timeout.connect(self._on_tick)
         self._tick_timer.start()
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setMouseTracking(True)
 
         canvas_path = project_path / "canvas.png"
         if canvas_path.exists():
@@ -126,17 +145,42 @@ class CanvasView(QWidget):
     def invalidate_image_cache(self, rel_path: str = None):
         if rel_path is None:
             self._image_cache.clear()
+            self._effect_cache.clear()
+            self._effect_cache_order.clear()
         else:
             full_path = str(self._project_path / rel_path)
             self._image_cache.pop(full_path, None)
+            keys_to_drop = [k for k in self._effect_cache if k[1] == full_path]
+            for k in keys_to_drop:
+                self._effect_cache.pop(k, None)
+                try:
+                    self._effect_cache_order.remove(k)
+                except ValueError:
+                    pass
 
     def request_update(self):
         self._dirty = True
 
     def _on_tick(self):
+        if self.isVisible():
+            self._frame_hue = (self._frame_hue + 0.005) % 1.0
+            self._dirty = True
+            if self._playing:
+                self._preview_time += 0.016
+                self.preview_state_changed.emit()
         if self._dirty:
             self._dirty = False
             self.update()
+
+    def set_playing(self, val: bool):
+        self._playing = val
+        if not val:
+            self._preview_time = 0.0
+        self._dirty = True
+        self.preview_state_changed.emit()
+
+    def set_track_cursor(self, val: bool):
+        self._track_cursor = val
 
     def _update_transform(self):
         padding = 20
@@ -144,18 +188,108 @@ class CanvasView(QWidget):
         avail_h = self.height() - padding * 2
         if avail_w <= 0 or avail_h <= 0:
             return
-        scale_x = avail_w / self._canvas_w
-        scale_y = avail_h / self._canvas_h
-        self._scale = min(scale_x, scale_y)
+        fit_x = avail_w / self._canvas_w
+        fit_y = avail_h / self._canvas_h
+        self._base_scale = min(fit_x, fit_y)
+        self._scale = self._base_scale * self._user_zoom
         scaled_w = self._canvas_w * self._scale
         scaled_h = self._canvas_h * self._scale
-        self._offset_x = (self.width() - scaled_w) / 2
-        self._offset_y = (self.height() - scaled_h) / 2
+        self._offset_x = (self.width() - scaled_w) / 2 + self._pan_x
+        self._offset_y = (self.height() - scaled_h) / 2 + self._pan_y
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_transform()
         self.update()
+
+    def wheelEvent(self, event):
+        if self._scale <= 0:
+            event.ignore()
+            return
+        notches = event.angleDelta().y() / 120.0
+        if notches == 0:
+            event.ignore()
+            return
+        zoom_factor = 1.15 ** notches
+        new_zoom = max(0.1, min(10.0, self._user_zoom * zoom_factor))
+        if new_zoom == self._user_zoom:
+            event.accept()
+            return
+
+        cursor_pos = event.position()
+        canvas_x = (cursor_pos.x() - self._offset_x) / self._scale
+        canvas_y = (cursor_pos.y() - self._offset_y) / self._scale
+
+        self._user_zoom = new_zoom
+        new_scale = self._base_scale * new_zoom
+        new_center_x = (self.width() - self._canvas_w * new_scale) / 2
+        new_center_y = (self.height() - self._canvas_h * new_scale) / 2
+        self._pan_x = cursor_pos.x() - new_center_x - canvas_x * new_scale
+        self._pan_y = cursor_pos.y() - new_center_y - canvas_y * new_scale
+
+        self._update_transform()
+        self.request_update()
+        event.accept()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self._panning = True
+            self._pan_start = event.position()
+            self._pan_origin = (self._pan_x, self._pan_y)
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._panning and self._pan_start is not None:
+            delta = event.position() - self._pan_start
+            self._pan_x = self._pan_origin[0] + delta.x()
+            self._pan_y = self._pan_origin[1] + delta.y()
+            self._update_transform()
+            self.request_update()
+            event.accept()
+            return
+        if self._track_cursor and self._scale > 0:
+            canvas_w_px = self._canvas_w * self._scale
+            canvas_h_px = self._canvas_h * self._scale
+            if canvas_w_px > 0 and canvas_h_px > 0:
+                x = max(0.0, min(1.0, (event.position().x() - self._offset_x) / canvas_w_px))
+                y = max(0.0, min(1.0, (event.position().y() - self._offset_y) / canvas_h_px))
+                self._sim_cursor = QPointF(x, y)
+                self._dirty = True
+                self.preview_state_changed.emit()
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.MiddleButton and self._panning:
+            self._panning = False
+            self._pan_start = None
+            self.unsetCursor()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.modifiers() & Qt.KeyboardModifier.AltModifier:
+            if event.key() == Qt.Key.Key_F:
+                self._user_zoom = 1.0
+                self._pan_x = 0.0
+                self._pan_y = 0.0
+                self._update_transform()
+                self.request_update()
+                event.accept()
+                return
+            if event.key() == Qt.Key.Key_C:
+                if self._base_scale > 0:
+                    self._user_zoom = 1.0 / self._base_scale
+                self._pan_x = 0.0
+                self._pan_y = 0.0
+                self._update_transform()
+                self.request_update()
+                event.accept()
+                return
+        super().keyPressEvent(event)
 
     def _build_hex_cache(self, w, h):
         r = HEX_RADIUS
@@ -207,8 +341,10 @@ class CanvasView(QWidget):
         cw = int(canvas_rect.width())
         ch = int(canvas_rect.height())
         if cw > 0 and ch > 0:
-            if self._hex_cache is None or self._hex_cache_size != (cw, ch):
-                self._build_hex_cache(cw, ch)
+            base_cw = max(1, int(self._canvas_w * self._base_scale))
+            base_ch = max(1, int(self._canvas_h * self._base_scale))
+            if self._hex_cache is None or self._hex_cache_size != (base_cw, base_ch):
+                self._build_hex_cache(base_cw, base_ch)
             painter.drawPixmap(canvas_rect.toAlignedRect(), self._hex_cache)
 
         if self._canvas_pixmap:
@@ -245,10 +381,31 @@ class CanvasView(QWidget):
                             key=lambda e: e.get("hierarchy", 0),
                         )
                         if layer_effects:
-                            processed = Effects.apply_effects_to_image(layer_effects, cached.toImage())
+                            sig = Effects.effect_chain_signature(layer_effects)
+                            cache_key = (layer.get("id"), full_path, sig)
+                            processed = self._effect_cache.get(cache_key)
+                            if processed is None:
+                                context = {
+                                    "time": self._preview_time,
+                                    "mouse_x": self._sim_cursor.x(),
+                                    "mouse_y": self._sim_cursor.y(),
+                                }
+                                processed = Effects.apply_effects_to_image(layer_effects, cached.toImage(), context)
+                                self._effect_cache[cache_key] = processed
+                                self._effect_cache_order.append(cache_key)
+                                if len(self._effect_cache_order) > self._EFFECT_CACHE_CAP:
+                                    oldest = self._effect_cache_order.pop(0)
+                                    self._effect_cache.pop(oldest, None)
                             painter.drawImage(QRectF(lx, ly, lw, lh).toAlignedRect(), processed)
                         else:
                             painter.drawPixmap(QRectF(lx, ly, lw, lh).toAlignedRect(), cached)
+
+        if cw > 0 and ch > 0:
+            frame_pen = QPen(QColor.fromHslF(self._frame_hue, 1.0, 0.5))
+            frame_pen.setWidth(2)
+            painter.setPen(frame_pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(canvas_rect)
 
         painter.end()
 
@@ -297,6 +454,8 @@ class CanvasView(QWidget):
 
 class CreatorWindow(QMainWindow):
 
+    NON_RENDER_KEYS = frozenset({"name", "speed", "limit.x", "limit.y"})
+
     def __init__(self, project_path: Path):
         super().__init__()
         self._project_path = project_path
@@ -328,6 +487,13 @@ class CreatorWindow(QMainWindow):
             self._effects = []
 
         self._selected_layer = None
+
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(250)
+        self._save_timer.timeout.connect(self._flush_pending_saves)
+        self._pending_save_layers = False
+        self._pending_save_effects = False
 
         self.setWindowTitle(f"AWC - {self._project_name}")
         self.resize(1400, 900)
@@ -411,7 +577,17 @@ class CreatorWindow(QMainWindow):
 
         self._canvas_view = CanvasView(self._project_path, self._canvas_w, self._canvas_h, self._layers, self._effects)
         self._canvas_view.setMinimumWidth(300)
-        splitter.addWidget(self._canvas_view)
+
+        canvas_container = QWidget()
+        canvas_container.setStyleSheet("background: transparent;")
+        canvas_layout = QVBoxLayout(canvas_container)
+        canvas_layout.setContentsMargins(0, 0, 0, 0)
+        canvas_layout.setSpacing(0)
+        canvas_layout.addWidget(self._canvas_view, 1)
+        canvas_layout.addWidget(self._build_status_strip())
+
+        splitter.addWidget(canvas_container)
+        self._canvas_view.preview_state_changed.connect(self._refresh_preview_status)
 
         self._inspector_panel = QFrame()
         self._inspector_panel.setMinimumWidth(150)
@@ -473,6 +649,28 @@ class CreatorWindow(QMainWindow):
         data = json.loads(layers_path.read_text())
         data["layers"] = self._layers
         layers_path.write_text(json.dumps(data, indent=2))
+        self._pending_save_layers = False
+
+    def _save_effects(self):
+        effects_path = self._project_path / "effects.json"
+        effects_path.write_text(json.dumps({"effects": self._effects}, indent=2))
+        self._pending_save_effects = False
+
+    def _schedule_save_layers(self):
+        self._pending_save_layers = True
+        if not self._save_timer.isActive():
+            self._save_timer.start()
+
+    def _schedule_save_effects(self):
+        self._pending_save_effects = True
+        if not self._save_timer.isActive():
+            self._save_timer.start()
+
+    def _flush_pending_saves(self):
+        if self._pending_save_layers:
+            self._save_layers()
+        if self._pending_save_effects:
+            self._save_effects()
 
     def _rebuild_layer_panel(self):
         while self._layers_layout.count():
@@ -788,10 +986,11 @@ class CreatorWindow(QMainWindow):
         if self._selected_layer is None:
             return
         set_nested(self._selected_layer, key, value)
-        self._save_layers()
+        self._schedule_save_layers()
         if key == "name" or key == "visible":
             self._rebuild_layer_panel()
-        self._canvas_view.request_update()
+        if key not in self.NON_RENDER_KEYS:
+            self._canvas_view.request_update()
 
     def _on_color_pick(self, key: str, button: QPushButton, current: str, callback=None):
         color = QColorDialog.getColor(QColor(current), self, "Pick Color")
@@ -815,6 +1014,7 @@ class CreatorWindow(QMainWindow):
         line_edit.setText(rel)
         self._canvas_view.invalidate_image_cache(rel)
         self._on_property_changed(key, rel)
+        self._flush_pending_saves()
 
     def _on_add_effect(self):
         if self._selected_layer is None:
@@ -841,14 +1041,81 @@ class CreatorWindow(QMainWindow):
 
     def _on_effect_property_changed(self, effect: dict, key: str, value):
         set_nested(effect, key, value)
-        self._save_effects()
+        self._schedule_save_effects()
         self._canvas_view.request_update()
 
-    def _save_effects(self):
-        effects_path = self._project_path / "effects.json"
-        effects_path.write_text(json.dumps({"effects": self._effects}, indent=2))
+    def _build_status_strip(self) -> QFrame:
+        strip = QFrame()
+        strip.setFixedHeight(28)
+        strip.setStyleSheet(f"QFrame {{ background-color: {PANEL_BG}; border-top: 1px solid {PANEL_BORDER}; }}")
+        layout = QHBoxLayout(strip)
+        layout.setContentsMargins(8, 2, 8, 2)
+        layout.setSpacing(8)
+
+        toggle_btn_style = f"""
+            QPushButton {{
+                background-color: {BTN_BG};
+                color: #e1e1e1;
+                border: 1px solid {BTN_BORDER};
+                border-radius: 3px;
+                font-size: 13px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{ background-color: {BTN_HOVER}; }}
+            QPushButton:checked {{ background-color: {AEYIAN_BLUE}; border-color: {AEYIAN_BLUE}; }}
+        """
+
+        self._play_btn = QPushButton("▶")
+        self._play_btn.setFixedSize(28, 22)
+        self._play_btn.setCheckable(True)
+        self._play_btn.setStyleSheet(toggle_btn_style)
+        self._play_btn.toggled.connect(self._on_play_toggled)
+        layout.addWidget(self._play_btn)
+
+        self._time_label = QLabel("t=0.00s")
+        self._time_label.setStyleSheet("font-size: 12px; color: #888; background: transparent;")
+        self._time_label.setMinimumWidth(60)
+        layout.addWidget(self._time_label)
+
+        self._cursor_label = QLabel("(0.50, 0.50)")
+        self._cursor_label.setStyleSheet("font-size: 12px; color: #888; background: transparent;")
+        self._cursor_label.setMinimumWidth(90)
+        layout.addWidget(self._cursor_label)
+
+        layout.addStretch()
+
+        track_btn_style = f"""
+            QPushButton {{
+                background-color: {BTN_BG};
+                color: #e1e1e1;
+                border: 1px solid {BTN_BORDER};
+                border-radius: 3px;
+                padding: 2px 10px;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{ background-color: {BTN_HOVER}; }}
+            QPushButton:checked {{ background-color: {AEYIAN_BLUE}; border-color: {AEYIAN_BLUE}; }}
+        """
+
+        self._track_cursor_btn = QPushButton("Track Cursor")
+        self._track_cursor_btn.setCheckable(True)
+        self._track_cursor_btn.setStyleSheet(track_btn_style)
+        self._track_cursor_btn.toggled.connect(self._canvas_view.set_track_cursor)
+        layout.addWidget(self._track_cursor_btn)
+
+        return strip
+
+    def _on_play_toggled(self, checked: bool):
+        self._play_btn.setText("⏹" if checked else "▶")
+        self._canvas_view.set_playing(checked)
+
+    def _refresh_preview_status(self):
+        self._time_label.setText(f"t={self._canvas_view._preview_time:.2f}s")
+        sc = self._canvas_view._sim_cursor
+        self._cursor_label.setText(f"({sc.x():.2f}, {sc.y():.2f})")
 
     def closeEvent(self, event):
+        self._flush_pending_saves()
         preview = self._canvas_view.render_to_image()
         preview = preview.scaled(160, 90, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
         preview.save(str(self._project_path / "preview.png"))

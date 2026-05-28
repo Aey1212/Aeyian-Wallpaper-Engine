@@ -12,8 +12,15 @@ from . import effects_video
 # TODO: When cpu_count() <= 1, skip pool creation and fall back - for potato pc
 
 _POOL_WORKERS = min(6, multiprocessing.cpu_count())
-_fork_ctx = multiprocessing.get_context("fork")
-_pool = ProcessPoolExecutor(max_workers=_POOL_WORKERS, mp_context=_fork_ctx)
+_pool = None
+
+
+def _get_pool():
+    global _pool
+    if _pool is None:
+        ctx = multiprocessing.get_context("fork")
+        _pool = ProcessPoolExecutor(max_workers=_POOL_WORKERS, mp_context=ctx)
+    return _pool
 
 
 # do we have modules?
@@ -56,6 +63,15 @@ def get_schema(effect_type_key: str) -> list:
             return EFFECT_SHARED_SCHEMA + schema
     # Unknown effect – show name only
     return list(EFFECT_SHARED_SCHEMA)
+
+
+def effect_chain_signature(effects_list: list) -> tuple:
+    # Cache key for AWC's per-layer effect result cache.
+    ordered = sorted(effects_list, key=lambda e: e.get("hierarchy", 0))
+    return tuple(
+        (e.get("type", ""), tuple(sorted((e.get("params") or {}).items())))
+        for e in ordered
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +139,7 @@ def _hsl_to_rgb(h: int, s: int, l: int) -> tuple:
     return (r, g, b)
 
 
-def _apply_grayscale(img: QImage, params: dict) -> QImage:
+def _apply_grayscale(img: QImage, params: dict, context: dict | None = None) -> QImage:
     strength = max(0.0, min(1.0, params.get("strength", 1.0)))
     if strength == 0.0:
         return img
@@ -137,7 +153,7 @@ def _apply_grayscale(img: QImage, params: dict) -> QImage:
     return result
 
 
-def _apply_blur(img: QImage, params: dict) -> QImage:
+def _apply_blur(img: QImage, params: dict, context: dict | None = None) -> QImage:
     radius = max(1, min(50, int(params.get("radius", 5))))
     pixmap = QPixmap.fromImage(img)
     scene = QGraphicsScene()
@@ -156,7 +172,7 @@ def _apply_blur(img: QImage, params: dict) -> QImage:
     return result
 
 
-def _apply_brightness(img: QImage, params: dict) -> QImage:
+def _apply_brightness(img: QImage, params: dict, context: dict | None = None) -> QImage:
     brightness = max(-1.0, min(1.0, params.get("brightness", 0.0)))
     if brightness == 0.0:
         return img
@@ -284,7 +300,7 @@ def _hue_shift_chunk(args):
     return bytes(buf)
 
 
-def _apply_hue_shift(img: QImage, params: dict) -> QImage:
+def _apply_hue_shift(img: QImage, params: dict, context: dict | None = None) -> QImage:
     shift = params.get("shift", 0.0)
     if shift == 0.0:
         return img
@@ -294,6 +310,14 @@ def _apply_hue_shift(img: QImage, params: dict) -> QImage:
 
     raw = bytes(memoryview(result.bits()).cast('B'))
     n_bytes = len(raw)
+
+    # IPC overhead exceeds serial cost below this threshold
+    if n_bytes // 4 < 65536:
+        processed = _hue_shift_chunk((raw, shift_deg))
+        dest = memoryview(result.bits()).cast('B')
+        dest[:] = processed
+        return result
+
     chunk_size = ((n_bytes // _POOL_WORKERS) // 4) * 4  # 4 align
     if chunk_size == 0:
         chunk_size = n_bytes
@@ -302,7 +326,7 @@ def _apply_hue_shift(img: QImage, params: dict) -> QImage:
     for i in range(0, n_bytes, chunk_size):
         tasks.append((raw[i:i + chunk_size], shift_deg))
 
-    parts = list(_pool.map(_hue_shift_chunk, tasks))
+    parts = list(_get_pool().map(_hue_shift_chunk, tasks))
 
     dest = memoryview(result.bits()).cast('B')
     offset = 0
@@ -342,7 +366,7 @@ def _oversaturate_rgb_chunk(args):
     return bytes(buf)
 
 
-def _apply_saturation(img: QImage, params: dict) -> QImage:
+def _apply_saturation(img: QImage, params: dict, context: dict | None = None) -> QImage:
     strength = max(0.0, min(2.0, params.get("strength", 1.0)))
     if strength == 1.0:
         return img
@@ -362,6 +386,13 @@ def _apply_saturation(img: QImage, params: dict) -> QImage:
 
         raw = bytes(memoryview(result.bits()).cast('B'))
         n_bytes = len(raw)
+
+        if n_bytes // 4 < 65536:
+            processed = _oversaturate_rgb_chunk((raw, strength))
+            dest = memoryview(result.bits()).cast('B')
+            dest[:] = processed
+            return result
+
         chunk_size = ((n_bytes // _POOL_WORKERS) // 4) * 4
         if chunk_size == 0:
             chunk_size = n_bytes
@@ -370,7 +401,7 @@ def _apply_saturation(img: QImage, params: dict) -> QImage:
         for i in range(0, n_bytes, chunk_size):
             tasks.append((raw[i:i + chunk_size], strength))
 
-        parts = list(_pool.map(_oversaturate_rgb_chunk, tasks))
+        parts = list(_get_pool().map(_oversaturate_rgb_chunk, tasks))
 
         dest = memoryview(result.bits()).cast('B')
         offset = 0
@@ -381,7 +412,7 @@ def _apply_saturation(img: QImage, params: dict) -> QImage:
         return result
 
 
-def _apply_tint(img: QImage, params: dict) -> QImage:
+def _apply_tint(img: QImage, params: dict, context: dict | None = None) -> QImage:
     color_str = params.get("color", "#ffffff")
     strength = max(0.0, min(1.0, params.get("strength", 0.5)))
     if strength == 0.0:
@@ -406,7 +437,7 @@ _EFFECT_PROCESSORS = {
 }
 
 
-def apply_effects_to_image(effects_list: list, img: QImage) -> QImage:
+def apply_effects_to_image(effects_list: list, img: QImage, context: dict | None = None) -> QImage:
 
     result = img
     for fx in effects_list:
@@ -415,7 +446,7 @@ def apply_effects_to_image(effects_list: list, img: QImage) -> QImage:
         if processor is None:
             continue
         params = fx.get("params", {})
-        result = processor(result, params)
+        result = processor(result, params, context)
     return result
 
 # How the fuck will I add the harder effects?

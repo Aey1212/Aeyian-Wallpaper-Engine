@@ -10,5 +10,11 @@
         <entry name="selectedProject" type="String">
             <default></default>
         </entry>
+        <entry name="showCoordinates" type="Bool">
+            <default>true</default>
+        </entry>
+        <entry name="showCursorFollower" type="Bool">
+            <default>true</default>
+        </entry>
     </group>
 </kcfg>
