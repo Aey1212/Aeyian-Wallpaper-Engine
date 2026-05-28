@@ -43,3 +43,15 @@
 - Effects show in inspector below layer properties (not functional yet).
 
 - Preview thumbnail generation.
+
+## Version: BCP-0.0.5
+
+- Plugin: Hide/Show toggles for the coordinate readout and the cursor-follower dot, stacked next to Calibrate in the wallpaper config sidebar. State persists via KConfig.
+
+- AWC QoL added ability to zoom in, zoom out, shortcuts like Lalt+f and Lalt+c for proper viewpoints. Navigation is also easier with the new canvas border.
+
+- Proper performance boosts on AWC effect viewing.
+
+- Doing proper caches now.
+
+- AWC Play/Stop button, live time readout, cursor position tracker, and a base for a future "live preview" is added. Not working now but it eventually will.

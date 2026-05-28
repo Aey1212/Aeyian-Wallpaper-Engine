@@ -25,7 +25,7 @@ _WHICH = shutil.which
 PROJECTS_DIR = _HOME / ".local" / "share" / "interactive-wallpapers"
 CONFIG_PATH = _HOME / ".config" / "AWE.json" #TODO: actually use it.
 
-AWE_VERSION = "0.0.4" #TODO: actually pull from the fucking project.
+AWE_VERSION = "0.0.5" #TODO: actually pull from the fucking project.
 AEYIAN_BLUE = "#3A41E1"
 PLACEHOLDER_RED = "#e13b3e" # Let's hope people aren't stupid enough to not add pictures to their stuff
 

@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(AeyianWallpaperEngine
-    VERSION 0.0.4
+    VERSION 0.0.5
     DESCRIPTION "Interactive wallpaper engine for KDE Plasma"
     LANGUAGES CXX
 )
