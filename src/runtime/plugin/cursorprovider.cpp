@@ -1,6 +1,7 @@
 #include "cursorprovider.h"
 #include <QDebug>
 #include <QProcess>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
@@ -112,7 +113,14 @@ void CursorProvider::setupCalibrationTimer()
     m_calibrationTimer->start(3600000); // 1 hour in milliseconds
 }
 
-static const QString CALIBRATION_SCRIPT_PATH = QStringLiteral("/tmp/aeyian-cursor-calibrate.qml");
+static QString calibrationScriptPath()
+{
+    QString dir = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+    if (dir.isEmpty()) {
+        dir = QDir::tempPath();
+    }
+    return dir + QStringLiteral("/aeyian-cursor-calibrate.qml");
+}
 
 void CursorProvider::calibrate()
 {
@@ -137,10 +145,10 @@ void CursorProvider::calibrate()
     m_calibrating = true;
     m_lastCalibration.restart();
 
-    // reuse recycle repurpose
-    if (!QFileInfo::exists(CALIBRATION_SCRIPT_PATH)) {
-        QFile scriptFile(CALIBRATION_SCRIPT_PATH);
-        if (scriptFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    const QString scriptPath = calibrationScriptPath();
+    {
+        QFile scriptFile(scriptPath);
+        if (scriptFile.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
             scriptFile.write(
                 "import QtQuick\n"
                 "import org.kde.kwin as KWin\n"
@@ -167,7 +175,7 @@ void CursorProvider::calibrate()
         onScriptLoaded(exitCode);
     });
     loadProc->start(m_qdbusCmd, {"org.kde.KWin", "/Scripting",
-        "org.kde.kwin.Scripting.loadDeclarativeScript", CALIBRATION_SCRIPT_PATH, "aeyian-calibrate"});
+        "org.kde.kwin.Scripting.loadDeclarativeScript", scriptPath, "aeyian-calibrate"});
 }
 
 void CursorProvider::onScriptLoaded(int exitCode)
