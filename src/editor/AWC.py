@@ -197,6 +197,16 @@ class CanvasView(QWidget):
         self._offset_x = (self.width() - scaled_w) / 2 + self._pan_x
         self._offset_y = (self.height() - scaled_h) / 2 + self._pan_y
 
+    @staticmethod
+    def _calc_offset(mouse_norm: float, speed: float, limit_pct: float, layer_size: float) -> float:
+        if speed == 0 or limit_pct == 0:
+            return 0.0
+        mc = mouse_norm - 0.5
+        total_travel = layer_size * (limit_pct / 100.0)
+        half_travel = total_travel / 2.0
+        raw = mc * speed * total_travel
+        return max(-half_travel, min(half_travel, raw))
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_transform()
@@ -359,8 +369,12 @@ class CanvasView(QWidget):
             layer_type = layer.get("type", "")
             pos = layer.get("position", {"x": 0, "y": 0})
             size = layer.get("size", {"width": self._canvas_w, "height": self._canvas_h})
-            lx = self._offset_x + pos["x"] * self._scale
-            ly = self._offset_y + pos["y"] * self._scale
+            speed = layer.get("speed", 0)
+            limit = layer.get("limit", {"x": 0, "y": 0})
+            px = self._calc_offset(self._sim_cursor.x(), speed, limit.get("x", 0), size["width"])
+            py = self._calc_offset(self._sim_cursor.y(), speed, limit.get("y", 0), size["height"])
+            lx = self._offset_x + (pos["x"] + px) * self._scale
+            ly = self._offset_y + (pos["y"] + py) * self._scale
             lw = size["width"] * self._scale
             lh = size["height"] * self._scale
 
@@ -454,7 +468,7 @@ class CanvasView(QWidget):
 
 class CreatorWindow(QMainWindow):
 
-    NON_RENDER_KEYS = frozenset({"name", "speed", "limit.x", "limit.y"})
+    NON_RENDER_KEYS = frozenset({"name"})
 
     def __init__(self, project_path: Path):
         super().__init__()

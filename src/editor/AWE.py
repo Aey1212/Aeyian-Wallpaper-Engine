@@ -23,9 +23,38 @@ _HOME = Path.home()
 _WHICH = shutil.which
 
 PROJECTS_DIR = _HOME / ".local" / "share" / "interactive-wallpapers"
-CONFIG_PATH = _HOME / ".config" / "AWE.json" #TODO: actually use it.
+CONFIG_PATH = _HOME / ".config" / "AWE.json"
 
-AWE_VERSION = "0.0.5" #TODO: actually pull from the fucking project.
+DEFAULTS = {
+    "theme": "Aeyian Dark",
+    "language": "English",
+}
+
+
+def load_config() -> dict:
+    if not CONFIG_PATH.exists():
+        save_config(dict(DEFAULTS))
+        return dict(DEFAULTS)
+    try:
+        data = json.loads(CONFIG_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return dict(DEFAULTS)
+    return {**DEFAULTS, **data}
+
+
+def save_config(config: dict):
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(json.dumps(config, indent=2))
+
+
+def _read_version() -> str:
+    try:
+        return (Path(__file__).resolve().parents[2] / "VERSION").read_text().strip()
+    except OSError:
+        return "0.0.0"
+
+
+AWE_VERSION = _read_version()
 AEYIAN_BLUE = "#3A41E1"
 PLACEHOLDER_RED = "#e13b3e" # Let's hope people aren't stupid enough to not add pictures to their stuff
 
@@ -138,6 +167,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.setFixedSize(360, 240)
+        self._config = load_config()
         layout = QVBoxLayout(self)
 
 
@@ -152,6 +182,8 @@ class SettingsDialog(QDialog):
         self.theme_combo.addItems(["Aeyian Dark"])
         form.addRow("Theme:", self.theme_combo)
 
+        self._apply_config_to_widgets(self._config)
+
         layout.addLayout(form)
         layout.addSpacing(8)
 
@@ -165,12 +197,31 @@ class SettingsDialog(QDialog):
         btn_apply = QPushButton("Apply")
         btn_cancel = QPushButton("Cancel")
         btn_reset = QPushButton("Reset to Default")
+        btn_apply.clicked.connect(self._on_apply)
+        btn_cancel.clicked.connect(self.reject)
+        btn_reset.clicked.connect(self._on_reset)
         btn_row.addWidget(btn_apply)
         btn_row.addWidget(btn_cancel)
         btn_row.addStretch()
         btn_row.addWidget(btn_reset)
 
         layout.addLayout(btn_row)
+
+    def _apply_config_to_widgets(self, config: dict):
+        self.language_combo.setCurrentText(config.get("language", DEFAULTS["language"]))
+        self.theme_combo.setCurrentText(config.get("theme", DEFAULTS["theme"]))
+
+    def _on_apply(self):
+        self._config = {
+            "theme": self.theme_combo.currentText(),
+            "language": self.language_combo.currentText(),
+        }
+        save_config(self._config)
+        self.accept()
+
+    def _on_reset(self):
+        self._config = dict(DEFAULTS)
+        self._apply_config_to_widgets(self._config)
 
     def _open_projects_folder(self):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(PROJECTS_DIR)))
@@ -183,6 +234,7 @@ class MainWindow(QMainWindow):
         self.resize(1200, 800)
 
         self._selected_project = None
+        self._config = load_config()
 
         PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
 
