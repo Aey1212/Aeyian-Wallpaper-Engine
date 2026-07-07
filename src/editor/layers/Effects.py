@@ -23,6 +23,15 @@ def _get_pool():
     return _pool
 
 
+def _noop(_x):
+    return None
+
+
+def prewarm_pool():
+    pool = _get_pool()
+    list(pool.map(_noop, range(_POOL_WORKERS)))
+
+
 # do we have modules?
 _MODULES = {
     "image": effects_image,

@@ -1147,6 +1147,8 @@ if __name__ == "__main__":
         print(f"No project.json found in {project_path}")
         sys.exit(1)
 
+    Effects.prewarm_pool()
+
     app = QApplication(sys.argv)
     app.setStyleSheet(DARK_STYLE)
     window = CreatorWindow(project_path)
