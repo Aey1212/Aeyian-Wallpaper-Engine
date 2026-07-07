@@ -12,8 +12,8 @@ from PySide6.QtWidgets import (
     QPushButton, QMenu, QCheckBox, QSpinBox, QDoubleSpinBox, QLineEdit,
     QColorDialog, QFileDialog, QScrollArea, QFormLayout,
 )
-from PySide6.QtGui import QPainter, QColor, QPixmap, QPolygonF, QImage, QPen
-from PySide6.QtCore import Qt, QPointF, QRectF, QTimer, Signal
+from PySide6.QtGui import QPainter, QColor, QPixmap, QPolygonF, QImage, QPen, QRegion
+from PySide6.QtCore import Qt, QPointF, QRect, QRectF, QTimer, Signal
 
 from layers import (
     AddLayerDialog, AddEffectDialog, create_layer, create_effect,
@@ -162,16 +162,32 @@ class CanvasView(QWidget):
     def request_update(self):
         self._dirty = True
 
+    def _border_region(self) -> QRegion:
+        cw = int(self._canvas_w * self._scale)
+        ch = int(self._canvas_h * self._scale)
+        if cw <= 0 or ch <= 0:
+            return QRegion()
+        x = int(self._offset_x)
+        y = int(self._offset_y)
+        t = 3
+        return (QRegion(x - t, y - t, cw + 2 * t, t)
+                | QRegion(x - t, y + ch, cw + 2 * t, t)
+                | QRegion(x - t, y, t, ch)
+                | QRegion(x + cw, y, t, ch))
+
     def _on_tick(self):
-        if self.isVisible():
-            self._frame_hue = (self._frame_hue + 0.005) % 1.0
+        if not self.isVisible():
+            return
+        self._frame_hue = (self._frame_hue + 0.005) % 1.0
+        if self._playing:
+            self._preview_time += 0.016
             self._dirty = True
-            if self._playing:
-                self._preview_time += 0.016
-                self.preview_state_changed.emit()
+            self.preview_state_changed.emit()
         if self._dirty:
             self._dirty = False
             self.update()
+        else:
+            self.update(self._border_region())
 
     def set_playing(self, val: bool):
         self._playing = val
@@ -341,13 +357,26 @@ class CanvasView(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        painter.fillRect(self.rect(), QColor("#1e1e1e"))
-
         canvas_rect = QRectF(
             self._offset_x, self._offset_y,
             self._canvas_w * self._scale,
             self._canvas_h * self._scale,
         )
+
+        interior = canvas_rect.toAlignedRect().adjusted(2, 2, -2, -2)
+        if not event.region().intersects(interior) and self._hex_cache is not None:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#1e1e1e"))
+            painter.drawRect(event.rect())
+            frame_pen = QPen(QColor.fromHslF(self._frame_hue, 1.0, 0.5))
+            frame_pen.setWidth(2)
+            painter.setPen(frame_pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(canvas_rect)
+            painter.end()
+            return
+
+        painter.fillRect(self.rect(), QColor("#1e1e1e"))
 
         cw = int(canvas_rect.width())
         ch = int(canvas_rect.height())
