@@ -15,7 +15,7 @@ CLEAR_EOL="${ESC}[K"
 
 ROWS=$(tput lines)
 BAR_ROW=$((ROWS - 1))
-TOTAL_STEPS=5
+TOTAL_STEPS=6
 
 # Reserve bottom line
 setup_bar() {
@@ -97,8 +97,14 @@ cp "$QML_SRC/main.qml" "$WALLPAPER_DIR/contents/ui/"
 cp "$QML_SRC/config.qml" "$WALLPAPER_DIR/contents/ui/"
 cp "$SCRIPT_DIR/src/runtime/config/main.xml" "$WALLPAPER_DIR/contents/config/"
 
-# Step 5: Done
-aey_progress 5 "$TOTAL_STEPS" "Installation complete!"
+# Step 5: Runtime config (blur parity table)
+aey_progress 5 "$TOTAL_STEPS" "Installing runtime config..."
+CFG_DIR="$HOME/.config/aeyian-wallpaper-engine"
+mkdir -p "$CFG_DIR"
+cp "$SCRIPT_DIR/data/blur_transliteration.json" "$CFG_DIR/"
+
+# Step 6: Done
+aey_progress 6 "$TOTAL_STEPS" "Installation complete!"
 sleep 0.3
 
 # Cleanup bar and print final message in normal terminal
