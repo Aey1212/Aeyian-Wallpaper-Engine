@@ -188,6 +188,19 @@ WallpaperItem {
             onMyEffectsChanged: rebuildEffectChain()
             Component.onCompleted: rebuildEffectChain()
 
+            Component { id: grayscaleComponent
+                Desaturate { anchors.fill: parent } }
+            Component { id: hueShiftComponent
+                HueSaturation { anchors.fill: parent; saturation: 0.0; lightness: 0.0 } }
+            Component { id: saturationComponent
+                HueSaturation { anchors.fill: parent; hue: 0.0; lightness: 0.0 } }
+            Component { id: brightnessComponent
+                BrightnessContrast { anchors.fill: parent; contrast: 0.0 } }
+            Component { id: tintComponent
+                ColorOverlay { anchors.fill: parent } }
+            Component { id: blurComponent
+                FastBlur { anchors.fill: parent } }
+
             function rebuildEffectChain() {
                 for (var i = 0; i < _effectObjects.length; i++) {
                     _effectObjects[i].destroy()
@@ -210,70 +223,38 @@ WallpaperItem {
             }
 
             function createEffect(effectType, params, src, isLast) {
-                var qml = ""
+                var comp = null
+                var props = { source: src, visible: isLast }
 
                 if (effectType === "grayscale") {
-                    var strength = params.strength !== undefined ? params.strength : 1.0
-                    qml = 'import QtQuick; import Qt5Compat.GraphicalEffects;'
-                        + ' Desaturate {'
-                        + ' anchors.fill: parent;'
-                        + ' desaturation: ' + strength + ';'
-                        + ' visible: ' + isLast + ';'
-                        + ' }'
+                    comp = grayscaleComponent
+                    props.desaturation = params.strength !== undefined ? params.strength : 1.0
                 }
                 else if (effectType === "hue_shift") {
-                    var shift = params.shift !== undefined ? params.shift : 0.0
-                    qml = 'import QtQuick; import Qt5Compat.GraphicalEffects;'
-                        + ' HueSaturation {'
-                        + ' anchors.fill: parent;'
-                        + ' hue: ' + shift + ';'
-                        + ' saturation: 0.0; lightness: 0.0;'
-                        + ' visible: ' + isLast + ';'
-                        + ' }'
+                    comp = hueShiftComponent
+                    props.hue = params.shift !== undefined ? params.shift : 0.0
                 }
                 else if (effectType === "saturation") {
-                    var sat = params.strength !== undefined ? (params.strength - 1.0) : 0.0
-                    qml = 'import QtQuick; import Qt5Compat.GraphicalEffects;'
-                        + ' HueSaturation {'
-                        + ' anchors.fill: parent;'
-                        + ' saturation: ' + sat + ';'
-                        + ' hue: 0.0; lightness: 0.0;'
-                        + ' visible: ' + isLast + ';'
-                        + ' }'
+                    comp = saturationComponent
+                    props.saturation = params.strength !== undefined ? (params.strength - 1.0) : 0.0
                 }
                 else if (effectType === "brightness") {
-                    var brt = params.brightness !== undefined ? params.brightness : 0.0
-                    qml = 'import QtQuick; import Qt5Compat.GraphicalEffects;'
-                        + ' BrightnessContrast {'
-                        + ' anchors.fill: parent;'
-                        + ' brightness: ' + brt + ';'
-                        + ' contrast: 0.0;'
-                        + ' visible: ' + isLast + ';'
-                        + ' }'
+                    comp = brightnessComponent
+                    props.brightness = params.brightness !== undefined ? params.brightness : 0.0
                 }
                 else if (effectType === "tint") {
-                    var tintColor = params.color || "#ffffff"
+                    comp = tintComponent
+                    var tintColor = String(params.color || "#ffffff")
                     var tintStrength = params.strength !== undefined ? params.strength : 0.5
                     var alpha = Math.round(tintStrength * 255)
                     var alphaHex = ("0" + alpha.toString(16)).slice(-2)
                     var rgb = tintColor.replace(/^#/, "").slice(0, 6)
-                    var argbColor = "#" + alphaHex + rgb
-                    qml = 'import QtQuick; import Qt5Compat.GraphicalEffects;'
-                        + ' ColorOverlay {'
-                        + ' anchors.fill: parent;'
-                        + ' color: "' + argbColor + '";'
-                        + ' visible: ' + isLast + ';'
-                        + ' }'
+                    props.color = "#" + alphaHex + rgb
                 }
                 else if (effectType === "blur") {
+                    comp = blurComponent
                     var rawRadius = params.radius !== undefined ? params.radius : 5
-                    var radius = root.translateBlurRadius(rawRadius)
-                    qml = 'import QtQuick; import Qt5Compat.GraphicalEffects;'
-                        + ' FastBlur {'
-                        + ' anchors.fill: parent;'
-                        + ' radius: ' + radius + ';'
-                        + ' visible: ' + isLast + ';'
-                        + ' }'
+                    props.radius = root.translateBlurRadius(rawRadius)
                 }
                 else {
                     // Unknown type means skip - don't talk to strangers
@@ -281,8 +262,7 @@ WallpaperItem {
                 }
 
                 try {
-                    var obj = Qt.createQmlObject(qml, imageRoot, "effect_" + effectType)
-                    obj.source = src
+                    var obj = comp.createObject(imageRoot, props)
                     return obj
                 } catch(e) {
                     console.warn("AWE: Failed to create effect:", effectType, e)
