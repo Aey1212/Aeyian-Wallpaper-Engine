@@ -440,6 +440,12 @@ class CanvasView(QWidget):
                                 if len(self._effect_cache_order) > self._EFFECT_CACHE_CAP:
                                     oldest = self._effect_cache_order.pop(0)
                                     self._effect_cache.pop(oldest, None)
+                            else:
+                                try:
+                                    self._effect_cache_order.remove(cache_key)
+                                except ValueError:
+                                    pass
+                                self._effect_cache_order.append(cache_key)
                             painter.drawImage(QRectF(lx, ly, lw, lh).toAlignedRect(), processed)
                         else:
                             painter.drawPixmap(QRectF(lx, ly, lw, lh).toAlignedRect(), cached)
@@ -575,33 +581,33 @@ class CreatorWindow(QMainWindow):
             QPushButton::menu-indicator {{ image: none; }}
         """
 
+        def _stub_actions(menu, labels):
+            for label in labels:
+                act = menu.addAction(label)
+                act.setEnabled(False)
+
         project_btn = QPushButton("Project")
         project_btn.setStyleSheet(menu_btn_style)
         project_menu = QMenu(project_btn)
-        project_menu.addAction("Save")
-        project_menu.addAction("Save As")
+        _stub_actions(project_menu, ["Save", "Save As"])
         project_menu.addSeparator()
-        project_menu.addAction("Configure")
+        _stub_actions(project_menu, ["Configure"])
         project_btn.setMenu(project_menu)
         top_layout.addWidget(project_btn)
 
         edit_btn = QPushButton("Edit")
         edit_btn.setStyleSheet(menu_btn_style)
         edit_menu = QMenu(edit_btn)
-        edit_menu.addAction("Undo")
-        edit_menu.addAction("Redo")
+        _stub_actions(edit_menu, ["Undo", "Redo"])
         edit_menu.addSeparator()
-        edit_menu.addAction("Cut")
-        edit_menu.addAction("Copy")
-        edit_menu.addAction("Paste")
+        _stub_actions(edit_menu, ["Cut", "Copy", "Paste"])
         edit_btn.setMenu(edit_menu)
         top_layout.addWidget(edit_btn)
 
         help_btn = QPushButton("Help")
         help_btn.setStyleSheet(menu_btn_style)
         help_menu = QMenu(help_btn)
-        help_menu.addAction("Documentation")
-        help_menu.addAction("About AWC")
+        _stub_actions(help_menu, ["Documentation", "About AWC"])
         help_btn.setMenu(help_menu)
         top_layout.addWidget(help_btn)
 
@@ -1046,7 +1052,13 @@ class CreatorWindow(QMainWindow):
         cb(key, hex_color)
 
     def _on_file_browse(self, key: str, line_edit: QLineEdit):
-        path, _ = QFileDialog.getOpenFileName(self, "Select File", str(Path.home()))
+        if key == "image":
+            filt = "Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif);;All files (*)"
+        elif key == "video":
+            filt = "Videos (*.mp4 *.webm *.mkv *.mov *.gif);;All files (*)"
+        else:
+            filt = "All files (*)"
+        path, _ = QFileDialog.getOpenFileName(self, "Select File", str(Path.home()), filt)
         if not path:
             return
         src = Path(path)
@@ -1161,9 +1173,16 @@ class CreatorWindow(QMainWindow):
     def closeEvent(self, event):
         self._flush_pending_saves()
         preview = self._canvas_view.render_to_image()
-        preview = preview.scaled(160, 90, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        preview = preview.scaled(160, 90,
+                                 Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                                 Qt.TransformationMode.SmoothTransformation)
+        if preview.width() > 160 or preview.height() > 90:
+            crop_x = (preview.width() - 160) // 2
+            crop_y = (preview.height() - 90) // 2
+            preview = preview.copy(crop_x, crop_y, 160, 90)
         preview.save(str(self._project_path / "preview.png"))
-        subprocess.Popen([sys.executable, str(AWE_PATH)])
+        if "--from-awe" in sys.argv:
+            subprocess.Popen([sys.executable, str(AWE_PATH)])
         event.accept()
 
 

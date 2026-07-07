@@ -78,7 +78,7 @@ fi
 aey_progress 2 "$TOTAL_STEPS" "Building plugin..."
 mkdir -p "$PLUGIN_SRC/build"
 cd "$PLUGIN_SRC/build"
-cmake .. > /dev/null
+cmake .. -DCMAKE_BUILD_TYPE=Release > /dev/null
 make > /dev/null
 
 # Step 3: Install QML plugin

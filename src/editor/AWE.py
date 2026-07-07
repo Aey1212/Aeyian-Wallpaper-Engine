@@ -340,7 +340,8 @@ class MainWindow(QMainWindow):
         if not self._selected_project:
             return
         awc_path = Path(__file__).parent / "AWC.py"
-        subprocess.Popen([sys.executable, str(awc_path), str(self._selected_project)])
+        subprocess.Popen([sys.executable, str(awc_path),
+                          str(self._selected_project), "--from-awe"])
         QApplication.quit()
 
     def _on_rename_project(self):
