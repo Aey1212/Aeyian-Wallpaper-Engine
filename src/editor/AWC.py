@@ -22,6 +22,7 @@ from layers import (
     get_schema_for_layer, get_schema_for_effect, get_nested, set_nested,
     Effects,
 )
+from atomicio import atomic_write_json
 
 #TODO: Pull the theme from config
 
@@ -490,7 +491,7 @@ class CreatorWindow(QMainWindow):
             self._layers = layers_data.get("layers", [])
             if resolve_hierarchy(self._layers):
                 layers_data["layers"] = self._layers
-                (project_path / "layers.json").write_text(json.dumps(layers_data, indent=2))
+                atomic_write_json(project_path / "layers.json", layers_data)
         except (json.JSONDecodeError, OSError):
             self._layers = []
 
@@ -662,12 +663,12 @@ class CreatorWindow(QMainWindow):
         layers_path = self._project_path / "layers.json"
         data = json.loads(layers_path.read_text())
         data["layers"] = self._layers
-        layers_path.write_text(json.dumps(data, indent=2))
+        atomic_write_json(layers_path, data)
         self._pending_save_layers = False
 
     def _save_effects(self):
         effects_path = self._project_path / "effects.json"
-        effects_path.write_text(json.dumps({"effects": self._effects}, indent=2))
+        atomic_write_json(effects_path, {"effects": self._effects})
         self._pending_save_effects = False
 
     def _schedule_save_layers(self):

@@ -1,5 +1,9 @@
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from atomicio import atomic_write_json
 
 from .L_Dialog import AddLayerDialog, AddEffectDialog, LAYER_TYPES
 from . import Effects
@@ -65,7 +69,7 @@ def toggle_layer_visibility(project_path: Path, layers: list, layer_id: int, vis
     layers_path = project_path / "layers.json"
     data = json.loads(layers_path.read_text())
     data["layers"] = layers
-    layers_path.write_text(json.dumps(data, indent=2))
+    atomic_write_json(layers_path, data)
 
 
 def resolve_hierarchy(layers: list) -> bool:

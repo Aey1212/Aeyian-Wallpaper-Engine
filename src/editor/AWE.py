@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QPixmap, QImage, QColor, QDesktopServices
 from PySide6.QtCore import Qt, QUrl
 
+from atomicio import atomic_write_json
+
 
 _HOME = Path.home()
 _WHICH = shutil.which
@@ -44,7 +46,7 @@ def load_config() -> dict:
 
 def save_config(config: dict):
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(json.dumps(config, indent=2))
+    atomic_write_json(CONFIG_PATH, config)
 
 
 def _read_version() -> str:
@@ -300,9 +302,7 @@ class MainWindow(QMainWindow):
             },
             "properties": {},
         }
-        (project_dir / "project.json").write_text(
-            json.dumps(manifest, indent=2)
-        )
+        atomic_write_json(project_dir / "project.json", manifest)
 
         layers = {
             "layers": [
@@ -328,14 +328,9 @@ class MainWindow(QMainWindow):
                 },
             ],
         }
-        (project_dir / "layers.json").write_text(
-            json.dumps(layers, indent=2)
-        )
+        atomic_write_json(project_dir / "layers.json", layers)
 
-        effects = {"effects": []}
-        (project_dir / "effects.json").write_text(
-            json.dumps(effects, indent=2)
-        )
+        atomic_write_json(project_dir / "effects.json", {"effects": []})
 
         self._refresh_grid()
         self._select_project(project_dir)
@@ -366,7 +361,7 @@ class MainWindow(QMainWindow):
             return
 
         data["name"] = new_name.strip()
-        manifest_path.write_text(json.dumps(data, indent=2))
+        atomic_write_json(manifest_path, data)
 
         self._refresh_grid()
         self._select_project(self._selected_project)
