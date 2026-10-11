@@ -1,60 +1,91 @@
 import QtQuick
-import Qt5Compat.GraphicalEffects
 import org.kde.plasma.plasmoid
-import org.aey.wallpaperengine 1.0 // My beloved wayland mouse cursor plugin!
+import "aeyian" // My beloved wayland mouse cursor plugin!
 
 WallpaperItem {
     id: root
 
-    CursorProvider {
+    CursorReceiver {
         id: cursor
-        screenWidth: root.width
-        screenHeight: root.height
+        script: Qt.resolvedUrl("../kwin/v1/aeyian_cursor_v1.qml")
+        onPositionChanged: root.holdScreenFraction()
     }
 
     FileReader { id: fileReader }
 
+    ProjectWatcher {
+        path: root.selectedProject
+        onChanged: root.loadProject()
+    }
+
     property string selectedProject: root.configuration.selectedProject ?? ""
     property var layersData: []
     property var effectsData: []
-    property var blurMap: []
+    property var projectResolution: null
+    property string cursorRange: "desktop"
+    property point heldFraction: Qt.point(0.5, 0.5)
+    property point cursorFraction: cursorRange === "screen"
+        ? heldFraction : desktopFraction(cursor.x, cursor.y, Qt.application.screens)
+    property real cursorX: cursorFraction.x
+    property real cursorY: cursorFraction.y
 
     onSelectedProjectChanged: loadProject()
-    Component.onCompleted: {
-        loadBlurMap()
-        loadProject()
-    }
+    Component.onCompleted: loadProject()
 
-    function loadBlurMap() {
-        var raw = fileReader.readFile(
-            fileReader.homePath()
-            + "/.config/aeyian-wallpaper-engine/blur_transliteration.json"
-        )
-        if (raw) {
-            try {
-                var data = JSON.parse(raw)
-                blurMap = data.gaussian_to_fastblur || []
-            } catch(e) {
-                blurMap = []
-            }
+    function holdScreenFraction() {
+        var x = (cursor.x - Screen.virtualX) / root.width
+        var y = (cursor.y - Screen.virtualY) / root.height
+        if (cursor.tracking && x >= 0 && x < 1 && y >= 0 && y < 1) {
+            heldFraction = Qt.point(x, y)
         }
     }
 
-    function translateBlurRadius(gaussianRadius) {
-        if (blurMap.length === 0) return gaussianRadius
-        var idx = Math.floor(gaussianRadius)
-        if (idx < 0) return 0
-        if (idx >= blurMap.length - 1) return blurMap[blurMap.length - 1]
-        var frac = gaussianRadius - idx
-        return blurMap[idx] + (blurMap[idx + 1] - blurMap[idx]) * frac
+    function desktopFraction(x, y, screens) {
+        var left = Infinity
+        var top = Infinity
+        var right = -Infinity
+        var bottom = -Infinity
+        for (var i = 0; i < screens.length; i++) {
+            left = Math.min(left, screens[i].virtualX)
+            top = Math.min(top, screens[i].virtualY)
+            right = Math.max(right, screens[i].virtualX + screens[i].width)
+            bottom = Math.max(bottom, screens[i].virtualY + screens[i].height)
+        }
+        if (!cursor.tracking || right <= left || bottom <= top) {
+            return Qt.point(0.5, 0.5)
+        }
+        return Qt.point(Math.max(0, Math.min(1, (x - left) / (right - left))),
+                        Math.max(0, Math.min(1, (y - top) / (bottom - top))))
     }
 
     function loadProject() {
         if (!selectedProject) {
             layersData = []
             effectsData = []
+            projectResolution = null
+            cursorRange = "desktop"
             return
         }
+
+        var resolution = null
+        var range = "desktop"
+        var rawProject = fileReader.readFile(selectedProject + "/project.json")
+        if (rawProject) {
+            try {
+                var manifest = JSON.parse(rawProject)
+                var res = manifest.resolution
+                if (res && res.width > 0 && res.height > 0) {
+                    resolution = res
+                }
+                if (manifest.cursor_range === "screen") {
+                    range = "screen"
+                }
+            } catch(e) {
+                resolution = null
+            }
+        }
+        projectResolution = resolution
+        cursorRange = range
 
         // Load layers
         var rawLayers = fileReader.readFile(selectedProject + "/layers.json")
@@ -67,6 +98,11 @@ WallpaperItem {
                 layers.sort(function(a, b) {
                     return (a.hierarchy || 0) - (b.hierarchy || 0)
                 })
+                for (var i = 0; i < layers.length; i++) {
+                    if (layers[i].image) {
+                        layers[i].image_stamp = fileReader.modified(selectedProject + "/" + layers[i].image)
+                    }
+                }
                 layersData = layers
             } catch(e) {
                 layersData = []
@@ -87,29 +123,6 @@ WallpaperItem {
         }
     }
 
-    // ID check for layers & effects
-    function getLayerEffects(layerId) {
-        var result = []
-        for (var i = 0; i < effectsData.length; i++) {
-            if (effectsData[i].layer_id === layerId) {
-                result.push(effectsData[i])
-            }
-        }
-        result.sort(function(a, b) {
-            return (a.hierarchy || 0) - (b.hierarchy || 0)
-        })
-        return result
-    }
-
-    function calcOffset(mouseNorm, speed, limitPct, layerSize) {
-        if (speed === 0 || limitPct === 0) return 0
-        var mc = mouseNorm - 0.5
-        var totalTravel = layerSize * (limitPct / 100)
-        var halfTravel = totalTravel / 2
-        var raw = mc * speed * totalTravel
-        return Math.max(-halfTravel, Math.min(halfTravel, raw))
-    }
-
     // Fallback so gotta keep it
     Rectangle {
         anchors.fill: parent
@@ -117,178 +130,28 @@ WallpaperItem {
         visible: layersData.length === 0
     }
 
-    // Baklava
-    Repeater {
-        model: layersData
-
-        Loader {
-            property var layerData: modelData
-            property bool isCanvas: (layerData.id === 0) || (layerData.type === "canvas")
-
-            active: !isCanvas
-            visible: !isCanvas && (layerData.visible !== false)
-            z: layerData.hierarchy || 0
-
-            sourceComponent: {
-                if (layerData.type === "solid_color") return solidColorComponent
-                if (layerData.type === "image") return imageComponent
-                return null
-            }
-        }
-    }
-
-
-    Component {
-        id: solidColorComponent
-
-        Rectangle {
-            width: (layerData.size ? layerData.size.width : root.width)
-            height: (layerData.size ? layerData.size.height : root.height)
-            x: (layerData.position ? layerData.position.x : 0)
-               + root.calcOffset(cursor.mouseX, layerData.speed || 0,
-                                  layerData.limit ? layerData.limit.x || 0 : 0, width)
-            y: (layerData.position ? layerData.position.y : 0)
-               + root.calcOffset(cursor.mouseY, layerData.speed || 0,
-                                  layerData.limit ? layerData.limit.y || 0 : 0, height)
-            color: layerData.color || "#ffffff"
-        }
-    }
-
-
-    Component {
-        id: imageComponent
-
-        Item {
-            id: imageRoot
-
-            property var myEffects: root.getLayerEffects(layerData.id)
-            property var _effectObjects: []
-
-            width: (layerData.size ? layerData.size.width : root.width)
-            height: (layerData.size ? layerData.size.height : root.height)
-            x: (layerData.position ? layerData.position.x : 0)
-               + root.calcOffset(cursor.mouseX, layerData.speed || 0,
-                                  layerData.limit ? layerData.limit.x || 0 : 0, width)
-            y: (layerData.position ? layerData.position.y : 0)
-               + root.calcOffset(cursor.mouseY, layerData.speed || 0,
-                                  layerData.limit ? layerData.limit.y || 0 : 0, height)
-
-
-            Image {
-                id: baseImage
-                anchors.fill: parent
-                source: layerData.image
-                    ? ("file://" + selectedProject + "/" + layerData.image) : ""
-                fillMode: Image.Stretch
-                asynchronous: true
-                visible: imageRoot.myEffects.length === 0
-                layer.enabled: imageRoot.myEffects.length > 0
-            }
-
-            onMyEffectsChanged: rebuildEffectChain()
-            Component.onCompleted: rebuildEffectChain()
-
-            Component { id: grayscaleComponent
-                Desaturate { anchors.fill: parent } }
-            Component { id: hueShiftComponent
-                HueSaturation { anchors.fill: parent; saturation: 0.0; lightness: 0.0 } }
-            Component { id: saturationComponent
-                HueSaturation { anchors.fill: parent; hue: 0.0; lightness: 0.0 } }
-            Component { id: brightnessComponent
-                BrightnessContrast { anchors.fill: parent; contrast: 0.0 } }
-            Component { id: tintComponent
-                ColorOverlay { anchors.fill: parent } }
-            Component { id: blurComponent
-                FastBlur { anchors.fill: parent } }
-
-            function rebuildEffectChain() {
-                for (var i = 0; i < _effectObjects.length; i++) {
-                    _effectObjects[i].destroy()
-                }
-                _effectObjects = []
-
-                if (myEffects.length === 0) return
-
-                var prevSource = baseImage
-                for (var j = 0; j < myEffects.length; j++) {
-                    var fx = myEffects[j]
-                    var params = fx.params || {}
-                    var isLast = (j === myEffects.length - 1)
-                    var obj = createEffect(fx.type, params, prevSource, isLast)
-                    if (obj) {
-                        _effectObjects.push(obj)
-                        prevSource = obj
-                    }
-                }
-            }
-
-            function createEffect(effectType, params, src, isLast) {
-                var comp = null
-                var props = { source: src, visible: isLast }
-
-                if (effectType === "grayscale") {
-                    comp = grayscaleComponent
-                    props.desaturation = params.strength !== undefined ? params.strength : 1.0
-                }
-                else if (effectType === "hue_shift") {
-                    comp = hueShiftComponent
-                    props.hue = params.shift !== undefined ? params.shift : 0.0
-                }
-                else if (effectType === "saturation") {
-                    comp = saturationComponent
-                    props.saturation = params.strength !== undefined ? (params.strength - 1.0) : 0.0
-                }
-                else if (effectType === "brightness") {
-                    comp = brightnessComponent
-                    props.brightness = params.brightness !== undefined ? params.brightness : 0.0
-                }
-                else if (effectType === "tint") {
-                    comp = tintComponent
-                    var tintColor = String(params.color || "#ffffff")
-                    var tintStrength = params.strength !== undefined ? params.strength : 0.5
-                    var alpha = Math.round(tintStrength * 255)
-                    var alphaHex = ("0" + alpha.toString(16)).slice(-2)
-                    var rgb = tintColor.replace(/^#/, "").slice(0, 6)
-                    props.color = "#" + alphaHex + rgb
-                }
-                else if (effectType === "blur") {
-                    comp = blurComponent
-                    var rawRadius = params.radius !== undefined ? params.radius : 5
-                    props.radius = root.translateBlurRadius(rawRadius)
-                }
-                else {
-                    // Unknown type means skip - don't talk to strangers
-                    return null
-                }
-
-                try {
-                    var obj = comp.createObject(imageRoot, props)
-                    return obj
-                } catch(e) {
-                    console.warn("AWE: Failed to create effect:", effectType, e)
-                    return null
-                }
-            }
-        }
+    Scene {
+        width: root.projectResolution ? root.projectResolution.width : root.width
+        height: root.projectResolution ? root.projectResolution.height : root.height
+        x: (root.width - width) / 2
+        y: (root.height - height) / 2
+        scale: width > 0 && height > 0 ? Math.max(root.width / width, root.height / height) : 1
+        projectPath: root.selectedProject
+        layers: root.layersData
+        effects: root.effectsData
+        cursorX: root.cursorX
+        cursorY: root.cursorY
     }
 
     Text {
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.margins: 12
-        text: "X: " + cursor.mouseX.toFixed(3) + "  Y: " + cursor.mouseY.toFixed(3)
+        text: "X: " + root.cursorX.toFixed(3) + "  Y: " + root.cursorY.toFixed(3)
         color: "#e1e1e1" // white go brr!
         font.pixelSize: 14
         z: 9999
         visible: root.configuration.showCoordinates ?? true
-    }
-
-    // Calibrate button is instant thanks to this
-    property int triggerCalibrate: root.configuration.triggerCalibrate ?? 0
-    onTriggerCalibrateChanged: {
-        if (triggerCalibrate > 0) {
-            cursor.calibrate()
-        }
     }
 
     Rectangle {
@@ -297,9 +160,9 @@ WallpaperItem {
         height: 40
         radius: 20
         color: "#e13b3e" // red dot, sniper confirmed!
-        x: cursor.mouseX * parent.width - 20
-        y: cursor.mouseY * parent.height - 20
+        x: cursor.x - Screen.virtualX - 20
+        y: cursor.y - Screen.virtualY - 20
         z: 9998
-        visible: root.configuration.showCursorFollower ?? true
+        visible: cursor.tracking && (root.configuration.showCursorFollower ?? true)
     }
 }

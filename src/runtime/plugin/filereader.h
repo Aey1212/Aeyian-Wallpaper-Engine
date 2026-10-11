@@ -4,6 +4,8 @@
 #include <QObject>
 #include <QString>
 #include <QFile>
+#include <QFileInfo>
+#include <QDateTime>
 #include <QDir>
 
 class FileReader : public QObject
@@ -24,6 +26,12 @@ public:
     Q_INVOKABLE QString homePath() const
     {
         return QDir::homePath();
+    }
+
+    Q_INVOKABLE qint64 modified(const QString &path) const
+    {
+        QFileInfo info(path);
+        return info.exists() ? info.lastModified().toMSecsSinceEpoch() : 0;
     }
 
     Q_INVOKABLE QStringList listDirs(const QString &path) const

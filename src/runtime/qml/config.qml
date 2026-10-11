@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import org.aey.wallpaperengine 1.0
+import "aeyian"
 
 Item {
     id: configRoot
@@ -123,28 +123,6 @@ Item {
                 }
 
                 Item { Layout.fillHeight: true }
-
-                Rectangle {
-                    Layout.preferredWidth: 120
-                    Layout.preferredHeight: 40
-                    Layout.alignment: Qt.AlignHCenter
-                    color: "white"
-                    radius: 4
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: "Calibrate"
-                        font.pixelSize: 14
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: {
-                            var current = wallpaperConfiguration.triggerCalibrate ?? 0
-                            wallpaperConfiguration.triggerCalibrate = current + 1
-                        }
-                    }
-                }
 
                 Rectangle {
                     Layout.preferredWidth: 120
