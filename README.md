@@ -1,6 +1,6 @@
 # Aeyian Wallpaper Engine
 
-![License](https://img.shields.io/badge/License-Apache--2.0-blue) ![Version](https://img.shields.io/badge/Version-0.0.5-lightgreen)
+![License](https://img.shields.io/badge/License-Apache--2.0-blue) ![Version](https://img.shields.io/badge/Version-0.0.6-lightgreen)
 
 A native KDE Plasma 6 interactive wallpaper engine with a visual editor.
 
@@ -17,7 +17,7 @@ Bring Wallpaper Engine-like functionality to Linux natively:
 ## Status
 
 **Early Development**
-- Tracks simulated cursor and calibrates periodically to fix drift
+- Follows the real cursor through KWin, across all screens
 - Configure option at the plugin page integrated with the GUI
 - A demo GUI app is available at the project
 
@@ -41,8 +41,6 @@ The installer will:
 
 - Build the plugin 
 
-- Ask to add you to the `input` group (required for cursor tracking) 
-
 - Install to your local Plasma wallpapers
   
   
@@ -55,7 +53,7 @@ Then: Right-click desktop → Configure Desktop → Wallpaper Type → **Aeyian 
 
 ## Known Bugs
 
-- The engine currently disrespects the preference of a disabled trackpad, or other cursor-moving tools.
+- None known right now.
 
 ## License
 

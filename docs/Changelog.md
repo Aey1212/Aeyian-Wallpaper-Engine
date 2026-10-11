@@ -55,3 +55,19 @@
 - Doing proper caches now.
 
 - AWC Play/Stop button, live time readout, cursor position tracker, and a base for a future "live preview" is added. Not working now but it eventually will.
+
+## Version: BCP-0.0.6
+
+- Cursor position now comes from KWin instead of raw input devices. The Calibrate button is gone as a drift is not a concern anymore. **BUG 2** is fixed.
+
+- Multi-screen option: the cursor range covers the whole desktop, so wallpapers on several screens move as one picture. A wallpaper can choose as a single-screen instead, in AWC under `Project > Configure`.
+
+- Wallpapers scale to cover the screen from the project's resolution, and reload when the project is saved. No Plasma restart needed.
+
+- Renderer optimisation.
+
+- Blur is fixed into a real Gaussian blur.
+
+- The installer needs no sudo. The plugin ships inside the wallpaper package.
+
+- Layer and effect types that are not built yet are greyed out in the Add dialogs.
