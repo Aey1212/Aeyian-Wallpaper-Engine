@@ -34,6 +34,11 @@ TYPE_SCHEMAS = {
     "audio_reactive": [],
 }
 
+PROJECT_SCHEMA = [
+    {"key": "cursor_range", "label": "Cursor Range", "widget": "choice",
+     "choices": {"desktop": "Whole Desktop", "screen": "This Screen"}},
+]
+
 
 def get_schema_for_layer(layer: dict) -> list:
     layer_type = layer.get("type", "")

@@ -300,6 +300,7 @@ class MainWindow(QMainWindow):
                 "width": values["width"],
                 "height": values["height"],
             },
+            "cursor_range": "desktop",
             "properties": {},
         }
         atomic_write_json(project_dir / "project.json", manifest)

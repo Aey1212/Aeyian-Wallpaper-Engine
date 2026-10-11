@@ -15,6 +15,11 @@ LAYER_TYPES = {
     ],
 }
 
+BUILT_LAYER_TYPES = {
+    "Image Layer",
+    "Color Layer",
+}
+
 
 class AddLayerDialog(QDialog):
 
@@ -38,7 +43,10 @@ class AddLayerDialog(QDialog):
             self._tree.addTopLevelItem(category_item)
             for layer_type in types:
                 child = QTreeWidgetItem([layer_type])
-                child.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                if layer_type in BUILT_LAYER_TYPES:
+                    child.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                else:
+                    child.setFlags(Qt.ItemFlag.NoItemFlags)
                 category_item.addChild(child)
             category_item.setExpanded(True)
 
@@ -88,6 +96,7 @@ class AddEffectDialog(QDialog):
         from . import Effects
 
         effect_types = Effects.get_dialog_types(layer_type)
+        built_types = Effects.get_built_types(layer_type)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -103,7 +112,10 @@ class AddEffectDialog(QDialog):
             self._tree.addTopLevelItem(category_item)
             for effect_type in types:
                 child = QTreeWidgetItem([effect_type])
-                child.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                if effect_type in built_types:
+                    child.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                else:
+                    child.setFlags(Qt.ItemFlag.NoItemFlags)
                 category_item.addChild(child)
             category_item.setExpanded(True)
 

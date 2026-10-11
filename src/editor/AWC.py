@@ -10,23 +10,28 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QLabel, QVBoxLayout, QHBoxLayout, QFrame, QSplitter,
     QPushButton, QMenu, QCheckBox, QSpinBox, QDoubleSpinBox, QLineEdit,
-    QColorDialog, QFileDialog, QScrollArea, QFormLayout,
+    QColorDialog, QFileDialog, QScrollArea, QFormLayout, QComboBox, QDialog,
 )
-from PySide6.QtGui import QPainter, QColor, QPixmap, QPolygonF, QImage, QPen, QRegion
-from PySide6.QtCore import Qt, QPointF, QRect, QRectF, QTimer, Signal
+from PySide6.QtGui import QPainter, QColor, QPixmap, QPolygonF, QImage
+from PySide6.QtCore import Qt, QPointF, QRect, QTimer, QUrl, Signal
+from PySide6.QtQuick import QQuickImageProvider, QQuickWindow, QSGRendererInterface
+from PySide6.QtQuickWidgets import QQuickWidget
 
 from layers import (
     AddLayerDialog, AddEffectDialog, create_layer, create_effect,
     resolve_hierarchy, resolve_effect_hierarchy, toggle_layer_visibility,
     swap_layer_order, delete_layer, delete_effect,
     get_schema_for_layer, get_schema_for_effect, get_nested, set_nested,
-    Effects,
+    Effects, PROJECT_SCHEMA,
 )
 from atomicio import atomic_write_json
+from AWE import AWE_VERSION
+from AWV import grab_frame
 
 #TODO: Pull the theme from config
 
 AWE_PATH = Path(__file__).parent / "AWE.py"
+CANVAS_PATH = Path(__file__).parent / "canvas.qml"
 
 BTN_BG = "#2a2a2a"
 BTN_TEXT = "#e1e1e1"
@@ -76,6 +81,9 @@ DARK_STYLE = f"""
     QTreeWidget::item:selected {{
         background-color: {BTN_HOVER};
     }}
+    QTreeWidget::item:disabled {{
+        color: #666666;
+    }}
     QTreeWidget::branch {{
         background-color: #161616;
     }}
@@ -97,7 +105,52 @@ HEX_DARK = "#232323"
 HEX_RADIUS = 12
 
 
-class CanvasView(QWidget):
+def build_hex_pixmap(w: int, h: int) -> QPixmap:
+    r = HEX_RADIUS
+    hex_w = math.sqrt(3) * r
+    hex_h = 2 * r
+    row_step = hex_h * 0.75
+    colors = [QColor(HEX_LIGHT), QColor(HEX_MID), QColor(HEX_DARK)]
+
+    pixmap = QPixmap(int(w), int(h))
+    pixmap.fill(QColor(HEX_DARK))
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(Qt.PenStyle.NoPen)
+
+    rows = int(h / row_step) + 3
+    cols = int(w / hex_w) + 3
+
+    for row in range(-1, rows):
+        for col in range(-1, cols):
+            cx = col * hex_w + (hex_w * 0.5 if row % 2 else 0)
+            cy = row * row_step
+            ci = ((row % 3) + col) % 3
+            painter.setBrush(colors[ci])
+            points = []
+            for i in range(6):
+                angle_rad = math.radians(60 * i - 30)
+                points.append(QPointF(
+                    cx + r * math.cos(angle_rad),
+                    cy + r * math.sin(angle_rad),
+                ))
+            painter.drawPolygon(QPolygonF(points))
+
+    painter.end()
+    return pixmap
+
+
+class HexProvider(QQuickImageProvider):
+
+    def __init__(self):
+        super().__init__(QQuickImageProvider.ImageType.Pixmap)
+
+    def requestPixmap(self, id: str, size, requested_size) -> QPixmap:
+        w, h = (int(part) for part in id.split("x"))
+        return build_hex_pixmap(w, h)
+
+
+class CanvasView(QQuickWidget):
 
     preview_state_changed = Signal()
 
@@ -118,12 +171,7 @@ class CanvasView(QWidget):
         self._scale = 1.0
         self._offset_x = 0.0
         self._offset_y = 0.0
-        self._hex_cache = None
-        self._hex_cache_size = None
-        self._image_cache = {}
-        self._effect_cache = {}
-        self._effect_cache_order = []
-        self._EFFECT_CACHE_CAP = 16
+        self._hex_size = None
         self._frame_hue = 0.0
         self._playing = False
         self._preview_time = 0.0
@@ -137,63 +185,52 @@ class CanvasView(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
 
+        self.engine().addImageProvider("editor", HexProvider())
+        self.setResizeMode(QQuickWidget.ResizeMode.SizeRootObjectToView)
+        self.setSource(QUrl.fromLocalFile(str(CANVAS_PATH)))
+        self._root = self.rootObject()
+        self._root.setProperty("canvasWidth", canvas_w)
+        self._root.setProperty("canvasHeight", canvas_h)
         canvas_path = project_path / "canvas.png"
         if canvas_path.exists():
-            self._canvas_pixmap = QPixmap(str(canvas_path))
-        else:
-            self._canvas_pixmap = None
-
-    def invalidate_image_cache(self, rel_path: str = None):
-        if rel_path is None:
-            self._image_cache.clear()
-            self._effect_cache.clear()
-            self._effect_cache_order.clear()
-        else:
-            full_path = str(self._project_path / rel_path)
-            self._image_cache.pop(full_path, None)
-            keys_to_drop = [k for k in self._effect_cache if k[1] == full_path]
-            for k in keys_to_drop:
-                self._effect_cache.pop(k, None)
-                try:
-                    self._effect_cache_order.remove(k)
-                except ValueError:
-                    pass
+            self._root.setProperty("canvasSource", QUrl.fromLocalFile(str(canvas_path)))
+        self._push_scene()
 
     def request_update(self):
         self._dirty = True
 
-    def _border_region(self) -> QRegion:
-        cw = int(self._canvas_w * self._scale)
-        ch = int(self._canvas_h * self._scale)
-        if cw <= 0 or ch <= 0:
-            return QRegion()
-        x = int(self._offset_x)
-        y = int(self._offset_y)
-        t = 3
-        return (QRegion(x - t, y - t, cw + 2 * t, t)
-                | QRegion(x - t, y + ch, cw + 2 * t, t)
-                | QRegion(x - t, y, t, ch)
-                | QRegion(x + cw, y, t, ch))
+    def _scene_properties(self) -> dict:
+        layers = sorted((dict(layer) for layer in self._layers), key=lambda layer: layer.get("hierarchy", 0))
+        for layer in layers:
+            image = self._project_path / layer.get("image", "")
+            if layer.get("image") and image.exists():
+                layer["image_stamp"] = int(image.stat().st_mtime * 1000)
+        return {
+            "projectPath": str(self._project_path),
+            "layers": layers,
+            "effects": self._effects,
+        }
+
+    def _push_scene(self):
+        for key, value in self._scene_properties().items():
+            self._root.setProperty(key, value)
 
     def _on_tick(self):
         if not self.isVisible():
             return
         self._frame_hue = (self._frame_hue + 0.005) % 1.0
+        self._root.setProperty("frameHue", self._frame_hue)
         if self._playing:
             self._preview_time += 0.016
-            self._dirty = True
             self.preview_state_changed.emit()
         if self._dirty:
             self._dirty = False
-            self.update()
-        else:
-            self.update(self._border_region())
+            self._push_scene()
 
     def set_playing(self, val: bool):
         self._playing = val
         if not val:
             self._preview_time = 0.0
-        self._dirty = True
         self.preview_state_changed.emit()
 
     def set_track_cursor(self, val: bool):
@@ -213,21 +250,17 @@ class CanvasView(QWidget):
         scaled_h = self._canvas_h * self._scale
         self._offset_x = (self.width() - scaled_w) / 2 + self._pan_x
         self._offset_y = (self.height() - scaled_h) / 2 + self._pan_y
-
-    @staticmethod
-    def _calc_offset(mouse_norm: float, speed: float, limit_pct: float, layer_size: float) -> float:
-        if speed == 0 or limit_pct == 0:
-            return 0.0
-        mc = mouse_norm - 0.5
-        total_travel = layer_size * (limit_pct / 100.0)
-        half_travel = total_travel / 2.0
-        raw = mc * speed * total_travel
-        return max(-half_travel, min(half_travel, raw))
+        self._root.setProperty("viewScale", self._scale)
+        self._root.setProperty("offsetX", math.floor(self._offset_x))
+        self._root.setProperty("offsetY", math.floor(self._offset_y))
+        hex_size = (max(1, int(self._canvas_w * self._base_scale)), max(1, int(self._canvas_h * self._base_scale)))
+        if hex_size != self._hex_size:
+            self._hex_size = hex_size
+            self._root.setProperty("hexSource", QUrl(f"image://editor/{hex_size[0]}x{hex_size[1]}"))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_transform()
-        self.update()
 
     def wheelEvent(self, event):
         if self._scale <= 0:
@@ -255,7 +288,6 @@ class CanvasView(QWidget):
         self._pan_y = cursor_pos.y() - new_center_y - canvas_y * new_scale
 
         self._update_transform()
-        self.request_update()
         event.accept()
 
     def mousePressEvent(self, event):
@@ -274,7 +306,6 @@ class CanvasView(QWidget):
             self._pan_x = self._pan_origin[0] + delta.x()
             self._pan_y = self._pan_origin[1] + delta.y()
             self._update_transform()
-            self.request_update()
             event.accept()
             return
         if self._track_cursor and self._scale > 0:
@@ -284,7 +315,8 @@ class CanvasView(QWidget):
                 x = max(0.0, min(1.0, (event.position().x() - self._offset_x) / canvas_w_px))
                 y = max(0.0, min(1.0, (event.position().y() - self._offset_y) / canvas_h_px))
                 self._sim_cursor = QPointF(x, y)
-                self._dirty = True
+                self._root.setProperty("cursorX", x)
+                self._root.setProperty("cursorY", y)
                 self.preview_state_changed.emit()
         super().mouseMoveEvent(event)
 
@@ -304,7 +336,6 @@ class CanvasView(QWidget):
                 self._pan_x = 0.0
                 self._pan_y = 0.0
                 self._update_transform()
-                self.request_update()
                 event.accept()
                 return
             if event.key() == Qt.Key.Key_C:
@@ -313,193 +344,13 @@ class CanvasView(QWidget):
                 self._pan_x = 0.0
                 self._pan_y = 0.0
                 self._update_transform()
-                self.request_update()
                 event.accept()
                 return
         super().keyPressEvent(event)
 
-    def _build_hex_cache(self, w, h):
-        r = HEX_RADIUS
-        hex_w = math.sqrt(3) * r
-        hex_h = 2 * r
-        row_step = hex_h * 0.75
-        colors = [QColor(HEX_LIGHT), QColor(HEX_MID), QColor(HEX_DARK)]
-
-        pixmap = QPixmap(int(w), int(h))
-        pixmap.fill(QColor(HEX_DARK))
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-
-        rows = int(h / row_step) + 3
-        cols = int(w / hex_w) + 3
-
-        for row in range(-1, rows):
-            for col in range(-1, cols):
-                cx = col * hex_w + (hex_w * 0.5 if row % 2 else 0)
-                cy = row * row_step
-                ci = ((row % 3) + col) % 3
-                painter.setBrush(colors[ci])
-                points = []
-                for i in range(6):
-                    angle_rad = math.radians(60 * i - 30)
-                    points.append(QPointF(
-                        cx + r * math.cos(angle_rad),
-                        cy + r * math.sin(angle_rad),
-                    ))
-                painter.drawPolygon(QPolygonF(points))
-
-        painter.end()
-        self._hex_cache = pixmap
-        self._hex_cache_size = (int(w), int(h))
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        canvas_rect = QRectF(
-            self._offset_x, self._offset_y,
-            self._canvas_w * self._scale,
-            self._canvas_h * self._scale,
-        )
-
-        interior = canvas_rect.toAlignedRect().adjusted(2, 2, -2, -2)
-        if not event.region().intersects(interior) and self._hex_cache is not None:
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor("#1e1e1e"))
-            painter.drawRect(event.rect())
-            frame_pen = QPen(QColor.fromHslF(self._frame_hue, 1.0, 0.5))
-            frame_pen.setWidth(2)
-            painter.setPen(frame_pen)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRect(canvas_rect)
-            painter.end()
-            return
-
-        painter.fillRect(self.rect(), QColor("#1e1e1e"))
-
-        cw = int(canvas_rect.width())
-        ch = int(canvas_rect.height())
-        if cw > 0 and ch > 0:
-            base_cw = max(1, int(self._canvas_w * self._base_scale))
-            base_ch = max(1, int(self._canvas_h * self._base_scale))
-            if self._hex_cache is None or self._hex_cache_size != (base_cw, base_ch):
-                self._build_hex_cache(base_cw, base_ch)
-            painter.drawPixmap(canvas_rect.toAlignedRect(), self._hex_cache)
-
-        if self._canvas_pixmap:
-            painter.drawPixmap(canvas_rect.toAlignedRect(), self._canvas_pixmap)
-
-        render_layers = sorted(self._layers, key=lambda layer: layer.get("hierarchy", 0))
-        for layer in render_layers:
-            if layer.get("id", 0) == 0:
-                continue
-            if not layer.get("visible", True):
-                continue
-            layer_type = layer.get("type", "")
-            pos = layer.get("position", {"x": 0, "y": 0})
-            size = layer.get("size", {"width": self._canvas_w, "height": self._canvas_h})
-            speed = layer.get("speed", 0)
-            limit = layer.get("limit", {"x": 0, "y": 0})
-            px = self._calc_offset(self._sim_cursor.x(), speed, limit.get("x", 0), size["width"])
-            py = self._calc_offset(self._sim_cursor.y(), speed, limit.get("y", 0), size["height"])
-            lx = self._offset_x + (pos["x"] + px) * self._scale
-            ly = self._offset_y + (pos["y"] + py) * self._scale
-            lw = size["width"] * self._scale
-            lh = size["height"] * self._scale
-
-            if layer_type == "solid_color":
-                painter.fillRect(QRectF(lx, ly, lw, lh), QColor(layer.get("color", "#ffffff")))
-            elif layer_type == "image":
-                img_path = layer.get("image", "")
-                if img_path:
-                    full_path = str(self._project_path / img_path)
-                    if full_path not in self._image_cache:
-                        pm = QPixmap(full_path)
-                        if not pm.isNull():
-                            self._image_cache[full_path] = pm
-                    cached = self._image_cache.get(full_path)
-                    if cached:
-                        layer_effects = sorted(
-                            (e for e in self._effects if e.get("layer_id") == layer.get("id")),
-                            key=lambda e: e.get("hierarchy", 0),
-                        )
-                        if layer_effects:
-                            sig = Effects.effect_chain_signature(layer_effects)
-                            cache_key = (layer.get("id"), full_path, sig)
-                            processed = self._effect_cache.get(cache_key)
-                            if processed is None:
-                                context = {
-                                    "time": self._preview_time,
-                                    "mouse_x": self._sim_cursor.x(),
-                                    "mouse_y": self._sim_cursor.y(),
-                                }
-                                processed = Effects.apply_effects_to_image(layer_effects, cached.toImage(), context)
-                                self._effect_cache[cache_key] = processed
-                                self._effect_cache_order.append(cache_key)
-                                if len(self._effect_cache_order) > self._EFFECT_CACHE_CAP:
-                                    oldest = self._effect_cache_order.pop(0)
-                                    self._effect_cache.pop(oldest, None)
-                            else:
-                                try:
-                                    self._effect_cache_order.remove(cache_key)
-                                except ValueError:
-                                    pass
-                                self._effect_cache_order.append(cache_key)
-                            painter.drawImage(QRectF(lx, ly, lw, lh).toAlignedRect(), processed)
-                        else:
-                            painter.drawPixmap(QRectF(lx, ly, lw, lh).toAlignedRect(), cached)
-
-        if cw > 0 and ch > 0:
-            frame_pen = QPen(QColor.fromHslF(self._frame_hue, 1.0, 0.5))
-            frame_pen.setWidth(2)
-            painter.setPen(frame_pen)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRect(canvas_rect)
-
-        painter.end()
-
     def render_to_image(self) -> QImage:
-        img = QImage(self._canvas_w, self._canvas_h, QImage.Format.Format_ARGB32)
-        img.fill(QColor("#ffffff"))
-        painter = QPainter(img)
-
-        render_layers = sorted(self._layers, key=lambda layer: layer.get("hierarchy", 0))
-        for layer in render_layers:
-            if layer.get("id", 0) == 0:
-                continue
-            if not layer.get("visible", True):
-                continue
-            layer_type = layer.get("type", "")
-            pos = layer.get("position", {"x": 0, "y": 0})
-            size = layer.get("size", {"width": self._canvas_w, "height": self._canvas_h})
-            lx, ly = pos["x"], pos["y"]
-            lw, lh = size["width"], size["height"]
-
-            if layer_type == "solid_color":
-                painter.fillRect(QRectF(lx, ly, lw, lh), QColor(layer.get("color", "#ffffff")))
-            elif layer_type == "image":
-                img_path = layer.get("image", "")
-                if img_path:
-                    full_path = str(self._project_path / img_path)
-                    cached = self._image_cache.get(full_path)
-                    if not cached:
-                        pm = QPixmap(full_path)
-                        if not pm.isNull():
-                            cached = pm
-                    if cached:
-                        layer_effects = sorted(
-                            (e for e in self._effects if e.get("layer_id") == layer.get("id")),
-                            key=lambda e: e.get("hierarchy", 0),
-                        )
-                        if layer_effects:
-                            processed = Effects.apply_effects_to_image(layer_effects, cached.toImage())
-                            painter.drawImage(QRectF(lx, ly, lw, lh).toAlignedRect(), processed)
-                        else:
-                            painter.drawPixmap(QRectF(lx, ly, lw, lh).toAlignedRect(), cached)
-
-        painter.end()
-        return img
+        project = {"width": self._canvas_w, "height": self._canvas_h, "scene": self._scene_properties()}
+        return grab_frame(project, 0.5, 0.5)
 
 
 class CreatorWindow(QMainWindow):
@@ -591,7 +442,8 @@ class CreatorWindow(QMainWindow):
         project_menu = QMenu(project_btn)
         _stub_actions(project_menu, ["Save", "Save As"])
         project_menu.addSeparator()
-        _stub_actions(project_menu, ["Configure"])
+        configure_action = project_menu.addAction("Configure")
+        configure_action.triggered.connect(self._on_configure_project)
         project_btn.setMenu(project_menu)
         top_layout.addWidget(project_btn)
 
@@ -681,12 +533,6 @@ class CreatorWindow(QMainWindow):
     def _on_layer_delete(self, layer_id: int):
         if self._selected_layer and self._selected_layer.get("id") == layer_id:
             self._selected_layer = None
-        for layer in self._layers:
-            if layer.get("id") == layer_id:
-                img = layer.get("image") or layer.get("video")
-                if img:
-                    self._canvas_view.invalidate_image_cache(img)
-                break
         delete_layer(self._project_path, self._layers, self._effects, layer_id)
         self._save_layers()
         self._save_effects()
@@ -1006,6 +852,15 @@ class CreatorWindow(QMainWindow):
             widget.valueChanged.connect(lambda val, k=key, cb=callback: cb(k, val))
             return widget
 
+        if widget_type == "choice":
+            widget = QComboBox()
+            for value, label in entry["choices"].items():
+                widget.addItem(label, value)
+            widget.setCurrentIndex(max(0, widget.findData(current_value)))
+            widget.setStyleSheet("background: #2a2a2a; color: #e1e1e1; border: 1px solid #3a3a3a; padding: 3px;")
+            widget.currentIndexChanged.connect(lambda _, k=key, w=widget, cb=callback: cb(k, w.currentData()))
+            return widget
+
         if widget_type == "color":
             color_str = str(current_value or "#ffffff")
             widget = QPushButton()
@@ -1031,6 +886,38 @@ class CreatorWindow(QMainWindow):
             return row
 
         return None
+
+    def _build_project_settings(self) -> QDialog | None:
+        try:
+            manifest = json.loads((self._project_path / "project.json").read_text())
+        except (json.JSONDecodeError, OSError):
+            return None
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Project Settings")
+        form = QFormLayout(dialog)
+        form.setSpacing(6)
+        for entry in PROJECT_SCHEMA:
+            label = QLabel(entry["label"])
+            label.setStyleSheet("font-size: 12px; color: #aaa; background: transparent;")
+            widget = self._make_property_widget(
+                entry, manifest, lambda key, value, m=manifest: self._on_project_setting_changed(m, key, value))
+            if widget is not None:
+                form.addRow(label, widget)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        form.addRow(close_btn)
+        return dialog
+
+    def _on_configure_project(self):
+        dialog = self._build_project_settings()
+        if dialog is not None:
+            dialog.exec()
+
+    def _on_project_setting_changed(self, manifest: dict, key: str, value):
+        set_nested(manifest, key, value)
+        manifest["editor_version"] = AWE_VERSION
+        atomic_write_json(self._project_path / "project.json", manifest)
 
     def _on_property_changed(self, key: str, value):
         if self._selected_layer is None:
@@ -1068,7 +955,6 @@ class CreatorWindow(QMainWindow):
         shutil.copy2(str(src), str(dest))
         rel = f"assets/{dest_name}"
         line_edit.setText(rel)
-        self._canvas_view.invalidate_image_cache(rel)
         self._on_property_changed(key, rel)
         self._flush_pending_saves()
 
@@ -1088,6 +974,7 @@ class CreatorWindow(QMainWindow):
         resolve_effect_hierarchy(self._effects, layer_id)
         self._save_effects()
         self._rebuild_inspector()
+        self._canvas_view.request_update()
 
     def _on_delete_effect(self, effect_id: int):
         delete_effect(self._effects, effect_id)
@@ -1196,8 +1083,7 @@ if __name__ == "__main__":
         print(f"No project.json found in {project_path}")
         sys.exit(1)
 
-    Effects.prewarm_pool()
-
+    QQuickWindow.setGraphicsApi(QSGRendererInterface.GraphicsApi.OpenGL)
     app = QApplication(sys.argv)
     app.setStyleSheet(DARK_STYLE)
     window = CreatorWindow(project_path)

@@ -8,6 +8,8 @@ EFFECT_TYPES = {
     ],
 }
 
+BUILT_EFFECTS = set()
+
 EFFECT_TYPE_MAP = {
     "Speed":      ("speed",      {"rate": 1.0}),
     "Chroma Key": ("chroma_key", {"color": "#00ff00", "tolerance": 0.3, "softness": 0.1}),

@@ -19,6 +19,15 @@ EFFECT_TYPES = {
     ],
 }
 
+BUILT_EFFECTS = {
+    "Grayscale",
+    "Hue Shift",
+    "Saturation",
+    "Brightness",
+    "Tint",
+    "Gaussian Blur",
+}
+
 EFFECT_TYPE_MAP = {
     # Color
     "Grayscale":          ("grayscale",   {"strength": 1.0}),
